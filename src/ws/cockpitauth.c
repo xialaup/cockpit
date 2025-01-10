@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -49,9 +49,14 @@
 #define ACTION_NONE "none"
 #define LOCAL_SESSION "local-session"
 
+/* we only support beibooting machines with a known/vetted OS, as it's impossible to guarantee
+ * forward compatibility for all pages */
+const gchar *cockpit_ws_ssh_program = "/usr/bin/env python3 -m cockpit.beiboot --remote-bridge=supported";
+
 /* Some tunables that can be set from tests */
-const gchar *cockpit_ws_session_program = LIBEXECDIR "/cockpit-session";
-const gchar *cockpit_ws_ssh_program = LIBEXECDIR "/cockpit-ssh";
+const gchar *cockpit_ws_session_program = NULL;
+
+#define WS_SESSION_SOCKET "/run/cockpit/session"
 
 /* Timeout of authenticated session when no connections */
 guint cockpit_ws_service_idle = 15;
@@ -125,6 +130,9 @@ typedef struct {
   /* An authorize challenge from session */
   JsonObject *authorize;
 
+  /* The failing "init" message from the session */
+  JsonObject *init_failure;
+
   /* The conversation in progress */
   gchar *conversation;
 } CockpitSession;
@@ -155,6 +163,8 @@ cockpit_session_reset (gpointer data)
   cookie = session->cookie;
   session->cookie = NULL;
   self = session->auth;
+
+  g_clear_pointer (&session->init_failure, json_object_unref);
 
   /* No accessing session after this point */
 
@@ -513,12 +523,14 @@ session_start_process (const gchar **argv,
 static void
 send_authorize_reply (CockpitTransport *transport,
                       const gchar *cookie,
-                      const gchar *authorization)
+                      const gchar *authorization,
+                      const gchar *remote_peer)
 {
   const gchar *fields[] = {
     "command", "authorize",
     "cookie", cookie,
     "response", authorization,
+    remote_peer ? "remote-peer" : NULL, remote_peer,
     NULL
   };
 
@@ -608,7 +620,8 @@ reply_authorize_challenge (CockpitSession *session)
   if (cockpit_authorize_type (session->authorization, &authorization_type) &&
       (g_str_equal (authorize_type, "*") || g_str_equal (authorize_type, authorization_type)))
     {
-      send_authorize_reply (session->transport, cookie, session->authorization);
+      const gchar *remote_peer = cockpit_creds_get_rhost (cockpit_web_service_get_creds (session->service));
+      send_authorize_reply (session->transport, cookie, session->authorization, remote_peer);
       cockpit_memory_clear (session->authorization, -1);
       g_free (session->authorization);
       session->authorization = NULL;
@@ -750,6 +763,8 @@ on_transport_control (CockpitTransport *transport,
           if (!cockpit_json_get_string (options, "message", NULL, &message))
             message = NULL;
           propagate_problem_to_error (session, options, problem, message, &error);
+          g_clear_pointer (&session->init_failure, json_object_unref);
+          session->init_failure = json_object_ref (options);
           if (session->login_task == NULL)
             {
               g_message ("ignoring failure from session process: %s", error->message);
@@ -774,7 +789,7 @@ on_transport_control (CockpitTransport *transport,
 
           /* return a negative answer; we handle unknown hosts interactively, or want to fail on them */
           g_debug ("received x-host-key authorize challenge");
-          send_authorize_reply (session->transport, cookie, "");
+          send_authorize_reply (session->transport, cookie, "", NULL /* does not need remote_peer here */);
           return TRUE;
         }
 
@@ -828,7 +843,9 @@ on_transport_closed (CockpitTransport *transport,
 
       if (cockpit_pipe_get_pid (pipe, NULL))
         status = cockpit_pipe_exit_status (pipe);
-      g_debug ("%s: authentication process exited: %d; problem %s", session->name, status, problem);
+
+      g_debug ("%s: authentication process exited: %d; problem %s; have authorize challenge? %i",
+              session->name, status, problem, session->authorize != NULL);
 
       if (captured_error)
         {
@@ -837,17 +854,22 @@ on_transport_closed (CockpitTransport *transport,
         }
       /* we get "access-denied" both if cockpit-session cannot execute cockpit-bridge (common case)
        * and if cockpit-session itself is not executable (corner case, messed up install) */
-      else if (problem && (!session->authorize || g_strcmp0 (problem, "access-denied") != 0))
+      if (!session->authorize)
+        {
+          g_set_error (&error, COCKPIT_ERROR, COCKPIT_ERROR_AUTHENTICATION_FAILED,
+                       "Authentication not available");
+        }
+      else if (g_strcmp0 (problem, "access-denied") == 0)
+        {
+          g_set_error (&error, COCKPIT_ERROR, COCKPIT_ERROR_AUTHENTICATION_FAILED,
+                       "Authentication failed");
+        }
+      else
         {
           g_set_error (&error, COCKPIT_ERROR, COCKPIT_ERROR_FAILED,
                        g_strcmp0 (problem, "no-cockpit") == 0
                            ? "The cockpit package is not installed"
                            : "Internal error in login process");
-        }
-      else
-        {
-          g_set_error (&error, COCKPIT_ERROR, COCKPIT_ERROR_AUTHENTICATION_FAILED,
-                       "Authentication failed");
         }
     }
 
@@ -886,7 +908,6 @@ build_session_credentials (CockpitAuth *self,
   char *raw = NULL;
 
   GBytes *password = NULL;
-  gchar *remote_peer = NULL;
   gchar *csrf_token = NULL;
 
   superuser = cockpit_web_request_lookup_header (request, "X-Superuser");
@@ -920,7 +941,7 @@ build_session_credentials (CockpitAuth *self,
         }
     }
 
-  remote_peer = cockpit_web_request_get_remote_address (request);
+  g_autofree gchar *remote_peer = cockpit_web_request_get_remote_address (request);
   csrf_token = cockpit_auth_nonce (self);
 
   creds = cockpit_creds_new (application,
@@ -931,7 +952,6 @@ build_session_credentials (CockpitAuth *self,
                              COCKPIT_CRED_SUPERUSER, superuser,
                              NULL);
 
-  g_free (remote_peer);
   if (raw)
     {
       cockpit_memory_clear (raw, strlen (raw));
@@ -969,6 +989,12 @@ on_web_service_idling (CockpitWebService *service,
 
   if (session->timeout_tag)
     g_source_remove (session->timeout_tag);
+
+  if (!g_strcmp0 (session->cookie, LOCAL_SESSION))
+    {
+      g_debug ("local session is idle, keeping");
+      return;
+    }
 
   g_debug ("session is idle");
 
@@ -1047,7 +1073,6 @@ cockpit_session_launch (CockpitAuth *self,
       return NULL;
     }
 
-  /* this might be unset, which means "allow if cockpit-ssh is installed"; if it isn't, this will fail later on */
   if (host && !cockpit_conf_bool ("WebService", "LoginTo", TRUE)) {
       g_set_error (error, COCKPIT_ERROR, COCKPIT_ERROR_AUTHENTICATION_FAILED,
                    "Direct remote login is disabled");
@@ -1093,19 +1118,18 @@ cockpit_session_launch (CockpitAuth *self,
            g_str_equal (type, "tls-cert"))
     {
       if (command == NULL && unix_path == NULL)
-        command = cockpit_ws_session_program;
+        {
+          if (cockpit_ws_session_program)
+            command = cockpit_ws_session_program;
+          else
+            unix_path = WS_SESSION_SOCKET;
+        }
     }
 
   g_autoptr(CockpitPipe) pipe = NULL;
   if (command != NULL)
     {
       g_auto(GStrv) env = g_get_environ ();
-      if (cockpit_creds_get_rhost (creds))
-        {
-          env = g_environ_setenv (env, "COCKPIT_REMOTE_PEER",
-                                  cockpit_creds_get_rhost (creds),
-                                  TRUE);
-        }
       if (g_strcmp0 (cockpit_web_request_lookup_header (request, "X-SSH-Connect-Unknown-Hosts"), "yes") == 0)
         {
           env = g_environ_setenv (env, "COCKPIT_SSH_CONNECT_TO_UNKNOWN_HOSTS",
@@ -1242,12 +1266,37 @@ base64_decode_string (const char *enc)
 }
 
 static CockpitSession *
+session_for_cookie_value (CockpitAuth *self,
+                          const gchar *cookie_value)
+{
+  gchar *decoded = NULL;
+  const char *prefix = "v=2;k=";
+  CockpitSession *ret = NULL;
+
+  g_return_val_if_fail (self != NULL, FALSE);
+
+  if (cookie_value)
+    {
+      decoded = base64_decode_string (cookie_value);
+      if (decoded != NULL)
+        {
+          if (g_str_has_prefix (decoded, prefix))
+            ret = g_hash_table_lookup (self->sessions, decoded);
+          else
+            g_debug ("invalid or unsupported cookie: %s", decoded);
+
+          g_free (decoded);
+        }
+    }
+
+  return ret;
+}
+
+static CockpitSession *
 session_for_request (CockpitAuth *self,
                      CockpitWebRequest *request)
 {
-  gchar *cookie = NULL;
   gchar *raw = NULL;
-  const char *prefix = "v=2;k=";
   CockpitSession *ret = NULL;
   gchar *application;
   gchar *cookie_name = NULL;
@@ -1260,23 +1309,12 @@ session_for_request (CockpitAuth *self,
 
   cookie_name = application_cookie_name (application);
   raw = cockpit_web_request_parse_cookie (request, cookie_name);
-  if (raw)
-    {
-      cookie = base64_decode_string (raw);
-      if (cookie != NULL)
-        {
-          if (g_str_has_prefix (cookie, prefix))
-            ret = g_hash_table_lookup (self->sessions, cookie);
-          else
-            g_debug ("invalid or unsupported cookie: %s", cookie);
+  ret = session_for_cookie_value (self, raw);
 
-          /* We must never find the default session based on a cookie */
-          g_assert (!ret || !g_str_equal (ret->cookie, LOCAL_SESSION));
-          g_assert (!ret || !g_str_equal (ret->name, LOCAL_SESSION));
-          g_free (cookie);
-        }
-      g_free (raw);
-    }
+  /* We must never find the default session based on a cookie */
+  g_assert (!ret || !g_str_equal (ret->cookie, LOCAL_SESSION));
+  g_assert (!ret || !g_str_equal (ret->name, LOCAL_SESSION));
+  g_free (raw);
 
   /* Check for a default session for auto-login */
   if (!ret)
@@ -1307,6 +1345,13 @@ cockpit_auth_check_cookie (CockpitAuth *self,
       g_debug ("received unknown/invalid credential cookie");
       return NULL;
     }
+}
+
+gboolean
+cockpit_auth_is_valid_cookie_value (CockpitAuth *self,
+                                    const gchar *cookie_value)
+{
+  return session_for_cookie_value (self, cookie_value) != NULL;
 }
 
 void
@@ -1510,24 +1555,21 @@ cockpit_auth_login_finish (CockpitAuth *self,
                            GHashTable *headers,
                            GError **error)
 {
-  JsonObject *body = NULL;
-  CockpitCreds *creds = NULL;
-  CockpitSession *session = NULL;
-  gboolean force_secure;
-  gchar *cookie_name;
-  gchar *cookie_b64;
-  gchar *header;
-  gchar *id;
+  g_autoptr(JsonObject) body = NULL;
 
   g_return_val_if_fail (g_task_is_valid (result, self), NULL);
 
-  if (!g_task_propagate_boolean (G_TASK (result), error))
-    goto out;
+  CockpitSession *session = g_task_get_task_data (G_TASK (result));
 
-  session = g_task_get_task_data (G_TASK (result));
+  if (!g_task_propagate_boolean (G_TASK (result), error))
+    {
+      if (session != NULL)
+        body = g_steal_pointer (&session->init_failure);
+      goto out;
+    }
+
   g_return_val_if_fail (session != NULL, NULL);
   g_return_val_if_fail (session->login_task == NULL, NULL);
-
   cockpit_session_reset (session);
 
   if (session->authorize)
@@ -1547,32 +1589,36 @@ cockpit_auth_login_finish (CockpitAuth *self,
     {
       /* Start off in the idling state, and begin a timeout during which caller must do something else */
       on_web_service_idling (session->service, session);
-      creds = cockpit_web_service_get_creds (session->service);
+      CockpitCreds *creds = cockpit_web_service_get_creds (session->service);
 
-      id = cockpit_auth_nonce (self);
+      g_autofree gchar *id = cockpit_auth_nonce (self);
       session->cookie = g_strdup_printf ("v=2;k=%s", id);
       g_hash_table_insert (self->sessions, session->cookie, cockpit_session_ref (session));
-      g_free (id);
 
       if (headers)
         {
+          gboolean force_secure;
+
           if (self->flags & COCKPIT_AUTH_FOR_TLS_PROXY)
             force_secure = TRUE;
           else
             force_secure = connection ? !G_IS_SOCKET_CONNECTION (connection) : TRUE;
-          cookie_name = application_cookie_name (cockpit_creds_get_application (creds));
-          cookie_b64 = g_base64_encode ((guint8 *)session->cookie, strlen (session->cookie));
-          header = g_strdup_printf ("%s=%s; Path=/; SameSite=Strict;%s HttpOnly",
-                                    cookie_name, cookie_b64,
-                                    force_secure ? " Secure;" : "");
-          g_free (cookie_b64);
-          g_free (cookie_name);
-          g_hash_table_insert (headers, g_strdup ("Set-Cookie"), header);
+
+          g_autofree gchar *cookie_name = application_cookie_name (cockpit_creds_get_application (creds));
+          g_autofree gchar *cookie_b64 = g_base64_encode ((guint8 *)session->cookie, strlen (session->cookie));
+          g_hash_table_insert (headers, g_strdup ("Set-Cookie"),
+                               g_strdup_printf ("%s=%s; Path=/; SameSite=Strict;%s HttpOnly",
+                                                cookie_name, cookie_b64, force_secure ? " Secure;" : ""));
         }
 
       if (body)
         json_object_unref (body);
       body = cockpit_creds_to_json (creds);
+
+      /* Successful login */
+      g_info ("User %s logged into session %s",
+              cockpit_creds_get_user (creds),
+              cockpit_web_service_get_id (session->service));
     }
   else
     {
@@ -1583,13 +1629,7 @@ cockpit_auth_login_finish (CockpitAuth *self,
 out:
   self->startups--;
 
-  /* Successful login */
-  if (creds)
-    g_info ("User %s logged into session %s",
-            cockpit_creds_get_user (creds),
-            cockpit_web_service_get_id (session->service));
-
-  return body;
+  return g_steal_pointer (&body);
 }
 
 CockpitAuth *

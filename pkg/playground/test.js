@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.querySelector(".super-channel .pf-v5-c-button").addEventListener("click", () => {
         document.querySelector(".super-channel span").textContent = "checking...";
-        cockpit.spawn(["id"], { superuser: true })
+        cockpit.spawn(["id"], { superuser: "require" })
                 .then(data => {
                     console.log("done");
                     document.querySelector(".super-channel span").textContent = "result: " + data;
@@ -124,6 +124,11 @@ document.addEventListener("DOMContentLoaded", () => {
     function show_hidden() {
         document.getElementById("hidden").textContent = cockpit.hidden ? "hidden" : "visible";
     }
+
+    cockpit.user().then(info => {
+        console.log(info);
+        document.getElementById("user-info").textContent = JSON.stringify(info);
+    });
 
     cockpit.addEventListener("visibilitychange", show_hidden);
     show_hidden();

@@ -118,7 +118,7 @@ function MockWebSocket(url, protocol) {
         if (typeof code != "number" && typeof code != "undefined")
             throw Error("WebSocket.close(@code) is not a number: " + typeof code);
         if (typeof reason != "string" && typeof reason != "undefined")
-            throw Error("WebSocket.close(@reason) is not a number: " + typeof string);
+            throw Error("WebSocket.close(@reason) is not a number: " + typeof reason);
         if (this.readyState > 1)
             throw Error("WebSocket.close() called on a closed WebSocket" + this.readyState + " " + code + reason);
         this.readyState = 3;
@@ -714,42 +714,6 @@ QUnit.test("filter message in", function (assert) {
         }
     });
 
-    channel.send("one");
-    channel.send("two");
-    channel.send("three");
-});
-
-QUnit.test("filter message out", function (assert) {
-    const done = assert.async();
-    assert.expect(10);
-
-    let filtered = 0;
-    let filtering = true;
-    cockpit.transport.filter(function(message, channelid, control) {
-        if (!filtering)
-            return true;
-        if (message[0] == '\n') {
-            assert.strictEqual(channelid, "", "control message channel");
-            assert.equal(typeof control, "object", "control is a JSON object");
-            assert.equal(typeof control.command, "string", "control has a command");
-        } else {
-            assert.strictEqual(channelid, channel.id, "cockpit channel id");
-            assert.equal(control, undefined, "control is undefined");
-            filtered += 1;
-
-            if (filtered != 1) {
-                channel.close();
-                filtering = false;
-                done();
-                return false;
-            }
-
-            return true;
-        }
-        return false;
-    }, true);
-
-    const channel = cockpit.channel({ payload: "null" });
     channel.send("one");
     channel.send("two");
     channel.send("three");

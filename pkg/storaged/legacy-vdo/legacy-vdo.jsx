@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -27,7 +27,7 @@ import { DescriptionList, DescriptionListDescription, DescriptionListGroup, Desc
 
 import { block_short_name, get_active_usage, teardown_active_usage, fmt_size, decode_filename, reload_systemd } from "../utils.js";
 import {
-    dialog_open, SizeSlider, BlockingMessage, TeardownMessage, init_active_usage_processes
+    dialog_open, SizeSlider, BlockingMessage, TeardownMessage, init_teardown_usage
 } from "../dialog.jsx";
 import { StorageButton, StorageOnOff } from "../storage-controls.jsx";
 
@@ -68,7 +68,7 @@ export function make_legacy_vdo_page(parent, vdo, backing_block, next_card) {
                     }
                 },
                 Inits: [
-                    init_active_usage_processes(client, usage)
+                    init_teardown_usage(client, usage)
                 ]
             });
         } else {
@@ -130,7 +130,7 @@ export function make_legacy_vdo_page(parent, vdo, backing_block, next_card) {
                 }
             },
             Inits: [
-                init_active_usage_processes(client, usage)
+                init_teardown_usage(client, usage)
             ]
         });
     }
@@ -184,7 +184,7 @@ class VDODetails extends React.Component {
         }
 
         if (path)
-            this.poll_process = cockpit.spawn([client.legacy_vdo_overlay.python, "--", "-", path], { superuser: true })
+            this.poll_process = cockpit.spawn([client.legacy_vdo_overlay.python, "--", "-", path], { superuser: "require" })
                     .input(inotify_py + vdo_monitor_py)
                     .stream((data) => {
                         buf += data;
@@ -263,7 +263,7 @@ class VDODetails extends React.Component {
                                 if (block && block.IdUsage == "filesystem")
                                     return cockpit.spawn(["fsadm", "resize",
                                         decode_filename(block.Device)],
-                                                         { superuser: true, err: "message" });
+                                                         { superuser: "require", err: "message" });
                             });
                     }
                 }

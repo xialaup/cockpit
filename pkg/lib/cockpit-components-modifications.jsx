@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import PropTypes from 'prop-types';
@@ -37,8 +37,8 @@ const _ = cockpit.gettext;
  * Enables showing shell and ansible script. Shell one is mandatory and ansible one can be omitted.
  *
  */
-export const ModificationsExportDialog = ({ show, onClose, shell, ansible }) => {
-    const [active_tab, setActiveTab] = React.useState("ansible");
+export const ModificationsExportDialog = ({ onClose, shell, ansible }) => {
+    const [active_tab, setActiveTab] = React.useState(ansible ? "ansible" : "shell");
     const [copied, setCopied] = React.useState(false);
     const [timeoutId, setTimeoutId] = React.useState(null);
 
@@ -79,24 +79,26 @@ export const ModificationsExportDialog = ({ show, onClose, shell, ansible }) => 
     );
 
     return (
-        <Modal isOpen={show} className="automation-script-modal"
+        <Modal isOpen className="automation-script-modal"
                position="top" variant="medium"
                onClose={onClose}
                footer={footer}
                title={_("Automation script") }>
             <Tabs activeKey={active_tab} onSelect={handleSelect}>
-                <Tab eventKey="ansible" title={_("Ansible")}>
-                    <TextArea resizeOrientation='vertical' readOnlyVariant="default" defaultValue={ansible.trim()} />
-                    <div className="ansible-docs-link">
-                        <OutlinedQuestionCircleIcon />
-                        { _("Create new task file with this content.") }
-                        <Button variant="link" component="a" href="https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html"
-                                target="_blank" rel="noopener noreferrer"
-                                icon={<ExternalLinkAltIcon />}>
-                            { _("Ansible roles documentation") }
-                        </Button>
-                    </div>
-                </Tab>
+                { ansible &&
+                    <Tab eventKey="ansible" title={_("Ansible")}>
+                        <TextArea resizeOrientation='vertical' readOnlyVariant="default" defaultValue={ansible.trim()} />
+                        <div className="ansible-docs-link">
+                            <OutlinedQuestionCircleIcon />
+                            { _("Create new task file with this content.") }
+                            <Button variant="link" component="a" href="https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html"
+                                    target="_blank" rel="noopener noreferrer"
+                                    icon={<ExternalLinkAltIcon />}>
+                                { _("Ansible roles documentation") }
+                            </Button>
+                        </div>
+                    </Tab>
+                }
                 <Tab eventKey="shell" title={_("Shell script")}>
                     <TextArea resizeOrientation='vertical' readOnlyVariant="default" defaultValue={shell.trim()} />
                 </Tab>
@@ -108,7 +110,6 @@ export const ModificationsExportDialog = ({ show, onClose, shell, ansible }) => 
 ModificationsExportDialog.propTypes = {
     shell: PropTypes.string.isRequired,
     ansible: PropTypes.string.isRequired,
-    show: PropTypes.bool.isRequired,
     onClose: PropTypes.func.isRequired,
 };
 
@@ -145,7 +146,10 @@ export const Modifications = ({ entries, failed, permitted, title, shell, ansibl
 
     return (
         <>
-            <ModificationsExportDialog show={showDialog} shell={shell} ansible={ansible} onClose={() => setShowDialog(false)} />
+            { showDialog &&
+                <ModificationsExportDialog shell={shell} ansible={ansible}
+                onClose={() => setShowDialog(false)} />
+            }
             <Card className="modifications-table">
                 <CardHeader>
                     <CardTitle component="h2">{title}</CardTitle>
@@ -178,5 +182,5 @@ Modifications.propTypes = {
     permitted: PropTypes.bool.isRequired,
     entries: PropTypes.arrayOf(PropTypes.string),
     shell: PropTypes.string.isRequired,
-    ansible: PropTypes.string.isRequired,
+    ansible: PropTypes.string,
 };

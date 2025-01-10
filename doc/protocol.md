@@ -55,11 +55,13 @@ Control messages are always sent in the control channel. They always have an
 empty channel. The payload of a control message is always a json
 object. There is always a "command" field:
 
-    {
-        "command": <command>,
-        "channel": <channel>,
-        ...
-    }
+```
+{
+    "command": <command>,
+    "channel": <channel>,
+    ...
+}
+```
 
 If a control message pertains to a specific channel it has a "channel" field
 containing the id of the channel. It is invalid to have a present but empty
@@ -112,6 +114,8 @@ The following fields are defined:
  * "capabilities": Optional, array of capability strings required from the bridge
  * "session": Optional, set to "private" or "shared". Defaults to "shared"
  * "flow-control": Optional boolean whether the channel should throttle itself via flow control.
+ * "send-acks": Set to "bytes" to send "ack" messages after processing each data frame
+
 
 If "binary" is set to "raw" then this channel transfers binary messages.
 
@@ -123,12 +127,14 @@ The channel id must not already be in use by another channel.
 
 An example of an open:
 
-    {
-        "command": "open",
-        "channel": "a4",
-        "payload": "stream",
-        "host": "localhost"
-    }
+```json
+{
+    "command": "open",
+    "channel": "a4",
+    "payload": "stream",
+    "host": "localhost"
+}
+```
 
 This message is sent to the cockpit-bridge.
 
@@ -162,36 +168,45 @@ channels in the "fence" group are closed before resuming.
 The "flow-control" option controls whether a channel should attempt to throttle
 itself via flow control when sending or receiving large amounts of data. The
 current default (when this option is not provided) is to not do flow control.
-However, this default will likely change in the future.
+However, this default will likely change in the future.  This only impacts data
+sent by the bridge to the browser.
+
+If "send-acks" is set to "bytes" then the bridge will send acknowledgement
+messages detailing the number of payload bytes that it has received and
+processed.  This mechanism is provided for senders (ie: in the browser) who
+wish to throttle the data that they're sending to the bridge.
 
 **Host values**
 
 Because the host parameter is how cockpit maps url requests to the correct bridge,
 cockpit may need to additional information to route the message correctly.
-For example you want to connect to a container ```my-container``` running
+For example you want to connect to a container `my-container` running
 on "my.host".
 
 To allow this the host parameter can encode a key/value pair that will
 be expanded in the open command json. The format is host+key+value. For example
 
-    {
-        "command": "open",
-        "channel": "a4",
-        "payload": "stream",
-        "host": "my.host+container+my-container"
-    }
+```json
+{
+    "command": "open",
+    "channel": "a4",
+    "payload": "stream",
+    "host": "my.host+container+my-container"
+}
+```
 
 will be expanded to
 
-    {
-        "command": "open",
-        "channel": "a4",
-        "payload": "stream",
-        "host": "my.host",
-        "host-container": "my-container",
-        "host": "my.host"
-    }
-
+```json
+{
+    "command": "open",
+    "channel": "a4",
+    "payload": "stream",
+    "host": "my.host",
+    "host-container": "my-container",
+    "host": "my.host"
+}
+```
 
 Command: close
 --------------
@@ -205,11 +220,13 @@ The following fields are defined:
 
 The channel id must be set.  An example of a close:
 
-    {
-        "command": "close",
-        "channel" : "5x",
-        "problem": "access-denied"
-    }
+```json
+{
+    "command": "close",
+    "channel" : "5x",
+    "problem": "access-denied"
+}
+```
 
 Any protocol participant can send this message. The cockpit-bridge and cockpit-ws
 backends will send this message when a channel closes whether because of an
@@ -228,9 +245,11 @@ The "auth-method-results" object contains a key for each method that cockpit-ws
 is able to attempt authentication with as well as the result of the attempt.
 For example:
 
-    {
-        "password": "denied"
-    }
+```json
+{
+    "password": "denied"
+}
+```
 
 This possible "result" values are:
 
@@ -296,9 +315,11 @@ is set this "ping" will be forwarded. Otherwise it be limited to a single hop.
 
 An example of a ping:
 
-    {
-        "command": "ping",
-    }
+```json
+{
+"command": "ping"
+}
+```
 
 Any protocol participant can send a "ping". It is responded to by sending
 a "pong" with identical options as a reply. If a "ping" is sent with a
@@ -323,27 +344,33 @@ For challenge/response authentication, the following fields are defined:
 
 Example authorize challenge and response messages:
 
-    {
-        "command": "authorize",
-        "cookie": "555",
-        "challenge": "crypt1:74657374:$6$2rcph,noe92ot..."
-    }
+```json
+{
+    "command": "authorize",
+    "cookie": "555",
+    "challenge": "crypt1:74657374:$6$2rcph,noe92ot..."
+}
+```
 
-    {
-        "command": "authorize",
-        "cookie": "555",
-        "response": "crypt1:$6$r0oetn2039ntoen..."
-    }
+```json
+{
+    "command": "authorize",
+    "cookie": "555",
+    "response": "crypt1:$6$r0oetn2039ntoen..."
+}
+```
 
 Authorize messages are used during authentication by authentication
-commands (ei: cockpit-session, cockpit-ssh) to obtain the users credentials
+commands like `cockpit-session` to obtain the users credentials
 from cockpit-ws. An authentication command can send a authorize message
 with a response but no cookie. For example
 
-    {
-        "command": "authorize",
-        "response": "Basic ..."
-    }
+```json
+{
+    "command": "authorize",
+    "response": "Basic ..."
+}
+```
 
 In that case cockpit-ws will store the response and use it in a reply
 to a subsequent challenge.
@@ -430,10 +457,12 @@ is received, then the channel is closed with a "protocol-error".
 Method calls are a JSON object with a "call" field, whose value is an array,
 with parameters in this order: path, interface, method, in arguments.
 
-    {
-        "call": [ "/path", "org.Interface", "Method", [ "arg0", 1, "arg2" ] ],
-        "id": "cookie"
-    }
+```json
+{
+    "call": [ "/path", "org.Interface", "Method", [ "arg0", 1, "arg2" ] ],
+    "id": "cookie"
+}
+```
 
 All the various parameters must be valid for their use. arguments may be
 null if no DBus method call body is expected. If a "type" field is specified
@@ -460,26 +489,30 @@ Method reply messages are JSON objects with a "reply" field whose value is
 an array, the array contains another array of out arguments, or null if
 the DBus reply had no body.
 
-    {
-        "reply": [ [ "arg0", 1, 2 ] ],
-        "id": "cookie"
-    }
+```json
+{
+    "reply": [ [ "arg0", 1, 2 ] ],
+    "id": "cookie"
+}
+```
 
 If the call had a "type" field, then the reply will have one too containing
 the DBus type signature of the arguments. If a "flags" field was present on
 the call, then "flags" will also be present on the reply. Valid out flags
 are:
 
- * ">": Big endian message
- * "<": Little endian message
+ * `>`: Big endian message
+ * `<`: Little endian message
 
 An error message is JSON object with an "error" field whose value is an
 array. The array contains: error name, error arguments
 
-    {
-        "error": [ "org.Error", [ "Usually a message" ] ]
-	"id": "cookie"
-    }
+```json
+{
+    "error": [ "org.Error", [ "Usually a message" ] ],
+    "id": "cookie"
+}
+```
 
 To receive signals you must subscribe to them. This is done by sending a
 "add-match" message. It contains various fields to match on. If a field
@@ -498,15 +531,17 @@ given string as their first argument. If any of the values are not
 valid according to the dbus specification, the channel will close with
 a "protocol-error".
 
-    {
-        "add-match": {
-            "name": "org.the.Name",
-            "path": "/the/path",
-            "interface": "org.Interface",
-            "member": "SignalName",
-            "arg0": "first argument",
-        }
+```json
+{
+    "add-match": {
+        "name": "org.the.Name",
+        "path": "/the/path",
+        "interface": "org.Interface",
+        "member": "SignalName",
+        "arg0": "first argument"
     }
+}
+```
 
 If the "name" field is omitted, it will be populated from the "open" message.
 If no "name" was specified in the "open" message, then DBus messages from any
@@ -518,31 +553,37 @@ times before the signals are actually unsubscribed.
 
 The form of "remove-match" is identical to "add-match".
 
-    {
-        "remove-match": {
-            "name": "org.the.Name",
-            "path": "/the/path",
-            "interface": "org.Interface",
-            "member": "SignalName",
-            "arg0": "first argument",
-        }
+```json
+{
+    "remove-match": {
+        "name": "org.the.Name",
+        "path": "/the/path",
+        "interface": "org.Interface",
+        "member": "SignalName",
+        "arg0": "first argument"
     }
+}
+```
 
 Signals are sent in JSON objects that have a "signal" field, which is an
 array of parameters: path, interface, signal name, and arguments. arguments
 may be null if the DBus signal had no body.
 
-    {
-        "signal": [ "/the/path", "org.Interface", "SignalName", [ "arg0", 1, 2 ] ]
-    }
+```json
+{
+    "signal": [ "/the/path", "org.Interface", "SignalName", [ "arg0", 1, 2 ] ]
+}
+```
 
 If a signal message is sent to the bridge, the signal will be emitted.
 In addition a "destination" field may be present to indicate whether
 the signal should be broadcast or not.
 
-    {
-        "signal": [ "/the/path", "org.Interface", "SignalName", [ "arg0", 1, 2 ] ]
-    }
+```json
+{
+    "signal": [ "/the/path", "org.Interface", "SignalName", [ "arg0", 1, 2 ] ]
+}
+```
 
 If the bus name of the sender of the signal does not match the "name" field of
 the "open" message, then a "name" field will be included with the "signal" message.
@@ -555,23 +596,27 @@ interfaces, otherwise DBus introspection is used. The "id" field is
 optional, if present a "reply" will be sent with this same "id" when
 the watch has sent "notify" messages about the things being watched.
 
-    {
-        "watch": {
-            "name": "org.the.Name",
-	    "path": "/the/path/to/watch",
-            "interface": org.Interface
-        }
-	"id": 5
-    }
+```json
+{
+    "watch": {
+        "name": "org.the.Name",
+        "path": "/the/path/to/watch",
+        "interface": "org.Interface"
+    },
+    "id": 5
+}
+```
 
 To remove a watch, pass the identical parameters with an "unwatch"
 request.
 
-    {
-        "unwatch": {
-            "path": "/the/path/to/watch"
-        }
+```json
+{
+    "unwatch": {
+        "path": "/the/path/to/watch"
     }
+}
+```
 
 If the "name" field is omitted, it will be populated from the "open" message.
 Either a "name" field must be specified here or in the "open" message.
@@ -581,20 +626,22 @@ addition of interfaces without properties, which will be an empty
 interface object, or interfaces removed, which will be null. Only the
 changes since the last "notify" message will be sent.
 
-    {
-	"notify": {
-            "/a/path": {
-                "org.Interface1": {
-                    "Prop1": x,
-                    "Prop2": y
-                },
-		"org.Interface2": { }
+```json
+{
+    "notify": {
+        "/a/path": {
+            "org.Interface1": {
+                "Prop1": "x",
+                "Prop2": 1
             },
-            "/another/path": {
-                "org.Removed": null
-            }
+            "org.Interface2": { }
+        },
+        "/another/path": {
+            "org.Removed": null
         }
     }
+}
+```
 
 If the bus name of the sender of the signal does not match the "name" field of
 the "open" message, then a "name" field will be included with the "notify" message.
@@ -604,20 +651,22 @@ first time an interface is sent using a "notify" message, a "meta"
 will be sent with that interface introspection info. Additional fields
 will be defined here, but this is it for now.
 
-    {
-        "meta": {
-            "org.Interface": {
-                "methods": {
-                    "Method1": { },
-                    "Method2": { }
-                },
-                "properties": {
-                    "Prop1": { "flags": "rw" },
-                    "Prop2": { "flags": "r" }
-                }
+```json
+{
+    "meta": {
+        "org.Interface": {
+            "methods": {
+                "Method1": { },
+                "Method2": { }
+            },
+            "properties": {
+                "Prop1": { "flags": "rw" },
+                "Prop2": { "flags": "r" }
             }
         }
     }
+}
+```
 
 If the bus name of the sender of the signal does not match the "name" field of
 the "open" message, then a "name" field will be included with the "meta" message.
@@ -628,9 +677,11 @@ When the owner of the DBus "name" (specified in the open message) changes an "ow
 message is sent. The owner value will be the id of the owner or null if the name
 is unowned.
 
-    {
-        "owner": "1:"
-    }
+```json
+{
+    "owner": "1:"
+}
+```
 
 A "publish" message can be used to export DBus interfaces on the bus. The bridge
 will then send "call" messages back to the frontend for each method invocation
@@ -639,17 +690,21 @@ with DBus meta information. If a cookie is specified then a reply will be sent
 when the interface is published. If the interface is already published at the given
 path, it will be replaced.
 
-   {
-       "publish": [ "/a/path", "org.Interface" ],
-       "id": "cookie"
-   }
+```json
+{
+    "publish": [ "/a/path", "org.Interface" ],
+    "id": "cookie"
+}
+```
 
 An "unpublish" message will unexport a DBus interface on the bus. It is not an
 error if no such interface has been published.
 
-   {
-       "unpublish": [ "/a/path", "org.Interface" ],
-   }
+```json
+{
+    "unpublish": [ "/a/path", "org.Interface" ]
+}
+```
 
 DBus types are encoded in various places in these messages, such as the
 arguments. These types are encoded as follows:
@@ -666,10 +721,12 @@ arguments. These types are encoded as follows:
  * variant: encoded as a JSON object with a "v" field containing a value
    and a "t" field containing a DBus type signature.
 
-   {
-       "v": "value",
-       "t": "s"
-   }
+```json
+{
+    "v": "value",
+    "t": "s"
+}
+```
 
 Payload: http-stream2
 ---------------------
@@ -795,6 +852,9 @@ following options can be specified:
  * "window": An object containing "rows" and "cols" properties, which set the
    size of the terminal window. Values must be integers between 0 and 0xffff.
    This option is only valid if "pty" is true.
+
+For type "spawn", the `ready` message contains a "pid" field with the spawned
+process ID.
 
 If an "done" is sent to the bridge on this channel, then the socket and/or pipe
 input is shutdown. The channel will send an "done" when the output of the socket
@@ -956,67 +1016,6 @@ The life-cycle of the channel works like this:
 
  - The channel will stay open until the client closes it.
 
-Payload: fswatch1
------------------
-
-You will get a stream of change notifications for a file or a
-directory.
-
-The following options can be specified in the "open" control message:
-
- * "path": The path name to watch.  This should be an absolute path to
-   a file or directory.
-
-Each message on the stream will be a JSON object with the following
-fields:
-
- * "event": A string describing the kind of change.  One of "changed",
-   "deleted", "created", "attribute-changed", "moved", or "done-hint".
-
- * "path": The absolute path name of the file that has changed.
-
- * "other": The absolute path name of the other file in case of a "moved"
-   event.
-
- * "type": If the event was created this contains the type of the new file.
-   Will be one of: file, directory, link, special or unknown.
-
-In case of an error, the channel will be closed.  In addition to the
-usual "problem" field, the "close" control message sent by the server
-might have the following additional fields:
-
- * "message": A string in the current locale describing the error.
-
-Payload: fslist1
----------------
-
-A channel of this type lists the files in a directory and will watch
-for further changes.
-
-The following options can be specified in the "open" control message:
-
- * "path": The path name of the directory to watch.  This should be an
-   absolute path.
- * "watch": Boolean, when true the directory will be watched and signal
-    on changes. Defaults to "true"
-
-The channel will send a number of JSON messages that list the current
-content of the directory.  These messages have a "event" field with
-value "present", a "path" field that holds the (relative) name of
-the file, "owner", "group", "size" and "modified" (timestamp) fields with
-some basic file information, and a "type" field. Type will be one of:
-file, directory, link, special or unknown. After all files have been listed the
-"ready" control message will be sent.
-
-Other messages on the stream signal changes to the directory, in the
-same format as used by the "fswatch1" payload type.
-
-In case of an error, the channel will be closed.  In addition to the
-usual "problem" field, the "close" control message sent by the server
-might have the following additional fields:
-
- * "message": A string in the current locale describing the error.
-
 Payload: fsread1
 ----------------
 
@@ -1049,7 +1048,7 @@ fields:
  * "tag": The transaction tag for the returned file content.  The tag
    for a non-existing file is "-".
 
-It is not permitted to send data in an fslist1 channel. This channel
+It is not permitted to send data in an fsread1 channel. This channel
 sends a "done" when all file data was sent.
 
 Payload: fsreplace1
@@ -1061,6 +1060,13 @@ The following options can be specified in the "open" control message:
 
  * "path": The path name of the file to replace.
 
+ * "size": The expected size of the file content.  If set, the file is
+   allocated immediately, and the channel "open" request will fail if
+   insufficient space is available.  If this option is set, it is not
+   possible to delete the file (ie: sending immediate EOF will result in
+   a 0 byte file) This option should always be provided if possible, to
+   avoid fragmentation, but is particularly important for large files.
+
  * "tag": The expected transaction tag of the file.  When the actual
    transaction tag of the file is different, the write will fail.  If
    you don't set this field, the actual tag will not be checked.  To
@@ -1069,9 +1075,15 @@ The following options can be specified in the "open" control message:
 You should write the new content to the channel as one or more
 messages.  To indicate the end of the content, send a "done" message.
 
-If you don't send any content messages before sending "done", the file
-will be removed.  To create an empty file, send at least one content
-message of length zero.
+If you don't send any content messages before sending "done", and no
+"size" was given, the file will be removed.  To create an empty file,
+send at least one content message of length zero, or set the "size" to
+0.
+
+If "size" is given, and less data is actually sent, then the file will
+be truncated down to the size of the data that was actually sent. If
+more data is sent, the file will grow (subject to additional
+fragmentation and potential ENOSPC errors).
 
 When the file does not have the expected tag, the channel will be
 closed with a "change-conflict" problem code.
@@ -1080,6 +1092,10 @@ The new content will be written to a temporary file and the old
 content will be replaced with a "rename" syscall when the channel is
 closed without problem code.  If the channel is closed with a problem
 code (by either client or server), the file will be left untouched.
+
+If `tag` is given, file owner and mode are preserved (copied from the
+original file). Other attributes (like ACLs or locally modified SELinux
+context) are never copied.
 
 In addition to the usual "problem" field, the "close" control message
 sent by the server might have the following additional fields:
@@ -1117,7 +1133,7 @@ The general open options are:
    * "direct": PCP metrics from plugins that are loaded into the
      Cockpit bridge directly.  Use this when in doubt.
 
-   * "pcmd": PCP metrics from the local PCP daemon.
+   * "pmcd": PCP metrics from the local PCP daemon.
 
    * A string starting with "/": PCP metrics from one or more
      archives.
@@ -1163,12 +1179,16 @@ The general open options are:
 You specify the desired metrics as an array of objects, where each
 object describes one metric.  For example:
 
-    [ { name: "kernel.all.cpu.user",
-        units: "millisec",
-        derive: "rate"
-      },
-      ...
-    ]
+```json
+[
+    {
+        "name": "kernel.all.cpu.user",
+        "units": "millisec",
+        "derive": "rate"
+    },
+    ...
+]
+```
 
 A metric description can contain the following fields:
 
@@ -1231,6 +1251,7 @@ message, and more fields might be present in the objects of the
 
 The 'data' messages are nested arrays in this shape:
 
+```
     [  // first point in time
        [
           // first metric (instanced, with two instances)
@@ -1250,10 +1271,11 @@ The 'data' messages are nested arrays in this shape:
           // same shape again as for the first point in time
        ]
     ]
+```
 
 Thus, a 'data' message contains data for one or more points in time
 where samples have been taken.  A point in time is always one
-"interval" later than the previous point in time, even when they are
+`interval` later than the previous point in time, even when they are
 reported in the same 'data' message.
 
 For real time monitoring, you will generally only receive one point in
@@ -1262,12 +1284,12 @@ might report multiple points in time in one message, to improve
 efficiency.
 
 For each point in time, there is an array with samples for each
-metric, in the same order as the "metrics" option used when opening
+metric, in the same order as the `metrics` option used when opening
 the channel.
 
 For non-instanced metrics, the array contains the value of the metric.
 For instanced metrics, the array contains another array with samples
-for each instance, in the same order as reported in the "instances"
+for each instance, in the same order as reported in the `instances`
 field of the most recent 'meta' message.
 
 In order to gain efficiency, 'data' messages are usually compressed.
@@ -1275,8 +1297,8 @@ This is done by only transmitting the differences from one point in
 time to the next.
 
 If a value for a metric or a instance is the same as at the previous
-point in time, the channel transmits a "null" value instead.
-Additionally, "null" values at the end of an array are suppressed by
+point in time, the channel transmits a `null` value instead.
+Additionally, `null` values at the end of an array are suppressed by
 transmitting a shorter array.
 
 For example, say the samples for three points in time are
@@ -1295,8 +1317,8 @@ This compression only happens when the last and current value belong
 to the same instance of the same metric.  Thus, the client does not
 need to track layout changes when decompressing data messages.
 
-Instead of a number of "null", a data message can also contain
-"false".  This indicates an error of some kind, or an unavailable
+Instead of a number of `null`, a data message can also contain
+`false`.  This indicates an error of some kind, or an unavailable
 value.
 
 **PCP metric source**
@@ -1311,11 +1333,11 @@ The format of the "units" member is the same as the one used by
 The metric information objects in the 'meta' messages for PCP sources
 also contain these fields:
 
- * "semantics" (string): The semantics of this metric, one of
-   "counter", "instant", or "discrete".
+ * `semantics` (string): The semantics of this metric, one of
+   `counter`, `instant`, or `discrete`.
 
 Only numeric metrics are currently supported.  Non-numeric metrics
-have all their samples set to "false".
+have all their samples set to `false`.
 
 Problem codes
 -------------
@@ -1323,15 +1345,15 @@ Problem codes
 These are problem codes for errors that cockpit-web responds to. They should
 be self explanatory. It's totally not interesting to arbitrarily invent new
 codes. Instead the web needs to be ready to react to these problems. When in
-doubt use "internal-error".
+doubt use `internal-error`.
 
- * "internal-error"
- * "no-cockpit"
- * "no-session"
- * "access-denied"
- * "authentication-failed"
- * "not-found"
- * "terminated"
- * "timeout"
- * "unknown-hostkey"
- * "no-forwarding"
+ * `internal-error`
+ * `no-cockpit`
+ * `no-session`
+ * `access-denied`
+ * `authentication-failed`
+ * `not-found`
+ * `terminated`
+ * `timeout`
+ * `unknown-hostkey`
+ * `no-forwarding`

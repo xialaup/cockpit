@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import json
 import os
@@ -26,11 +26,10 @@ import unittest
 from glob import glob
 
 import testlib
-import testvm
+from machine import testvm
 
 
 @unittest.skipUnless("TEST_OS" in os.environ, "TEST_OS not set")
-@testlib.skipDistroPackage()
 class TestImageCustomize(unittest.TestCase):
 
     def checkBoot(self, image):
@@ -127,7 +126,6 @@ class TestImageCustomize(unittest.TestCase):
 
 
 @unittest.skipUnless("TEST_OS" in os.environ, "TEST_OS not set")
-@testlib.skipDistroPackage()
 class TestBotsVM(unittest.TestCase):
 
     def testBasic(self):

@@ -25,15 +25,17 @@ import grp
 import logging
 import os
 import pwd
-import random
+import re
 import stat
-from typing import Callable, Iterable
+import tempfile
+from pathlib import Path
+from typing import Callable, Generator, Iterable
 
 from cockpit._vendor.systemd_ctypes import Handle, PathWatch
 from cockpit._vendor.systemd_ctypes.inotify import Event as InotifyEvent
 from cockpit._vendor.systemd_ctypes.pathwatch import Listener as PathWatchListener
 
-from ..channel import Channel, ChannelError, GeneratorChannel
+from ..channel import AsyncChannel, Channel, ChannelError, GeneratorChannel
 from ..jsonutil import (
     JsonDict,
     JsonDocument,
@@ -49,11 +51,17 @@ from ..jsonutil import (
 logger = logging.getLogger(__name__)
 
 
-def tag_from_stat(buf):
-    return f'1:{buf.st_ino}-{buf.st_mtime}'
+@functools.lru_cache()
+def my_umask() -> int:
+    match = re.search(r'^Umask:\s*0([0-7]*)$', Path('/proc/self/status').read_text(), re.M)
+    return (match and int(match.group(1), 8)) or 0o077
 
 
-def tag_from_path(path):
+def tag_from_stat(buf) -> str:
+    return f'1:{buf.st_ino}-{buf.st_mtime}-{buf.st_mode:o}-{buf.st_uid}-{buf.st_gid}'
+
+
+def tag_from_path(path) -> 'str | None':
     try:
         return tag_from_stat(os.stat(path))
     except FileNotFoundError:
@@ -62,13 +70,15 @@ def tag_from_path(path):
         return None
 
 
-def tag_from_fd(fd):
+def tag_from_fd(fd) -> 'str | None':
     try:
         return tag_from_stat(os.fstat(fd))
     except OSError:
         return None
 
 
+# DEPRECATED: https://github.com/cockpit-project/cockpit/pull/21055
+# as of 2024-09-30 there are no more users of this in any known project
 class FsListChannel(Channel):
     payload = 'fslist1'
 
@@ -112,9 +122,8 @@ class FsListChannel(Channel):
 class FsReadChannel(GeneratorChannel):
     payload = 'fsread1'
 
-    def do_yield_data(self, options: JsonObject) -> GeneratorChannel.DataGenerator:
+    def do_yield_data(self, options: JsonObject) -> Generator[bytes, None, JsonObject]:
         path = get_str(options, 'path')
-        binary = get_str(options, 'binary', None)
         max_read_size = get_int(options, 'max_read_size', None)
 
         logger.debug('Opening file "%s" for reading', path)
@@ -125,7 +134,7 @@ class FsReadChannel(GeneratorChannel):
                 if max_read_size is not None and buf.st_size > max_read_size:
                     raise ChannelError('too-large')
 
-                if binary and stat.S_ISREG(buf.st_mode):
+                if self.is_binary and stat.S_ISREG(buf.st_mode):
                     self.ready(size_hint=buf.st_size)
                 else:
                     self.ready()
@@ -135,115 +144,127 @@ class FsReadChannel(GeneratorChannel):
                     if data == b'':
                         break
                     logger.debug('  ...sending %d bytes', len(data))
-                    if not binary:
-                        data = data.replace(b'\0', b'').decode('utf-8', errors='ignore').encode('utf-8')
+                    if not self.is_binary:
+                        data = data.replace(b'\0', b'').decode(errors='ignore').encode()
                     yield data
 
             return {'tag': tag_from_stat(buf)}
 
         except FileNotFoundError:
-            return {'tag': '-'}
+            # Using `yield` and `return {value}` generator, but GeneratorChannel does expect this
+            return {'tag': '-'}  # noqa: B901
         except PermissionError as exc:
             raise ChannelError('access-denied') from exc
         except OSError as exc:
             raise ChannelError('internal-error', message=str(exc)) from exc
 
 
-class FsReplaceChannel(Channel):
+class FsReplaceChannel(AsyncChannel):
     payload = 'fsreplace1'
 
-    _path = None
-    _tag = None
-    _tempfile = None
-    _temppath = None
+    def delete(self, path: str, tag: 'str | None') -> str:
+        if tag is not None and tag != tag_from_path(path):
+            raise ChannelError('change-conflict')
+        with contextlib.suppress(FileNotFoundError):  # delete is idempotent
+            os.unlink(path)
+        return '-'
 
-    def unlink_temppath(self):
+    async def set_contents(
+        self, path: str, tag: 'str | None', data: 'bytes | None', size: 'int | None'
+    ) -> 'str | None':
+        dirname, basename = os.path.split(path)
+        tmpname: str | None
+        fd, tmpname = tempfile.mkstemp(dir=dirname, prefix=f'.{basename}-')
         try:
-            os.unlink(self._temppath)
-        except OSError:
-            pass  # might have been removed from outside
+            if size is not None:
+                logger.debug('fallocate(%s.tmp, %d)', path, size)
+                if size:  # posix_fallocate() of 0 bytes is EINVAL
+                    await self.in_thread(os.posix_fallocate, fd, 0, size)
+                self.ready()  # ...only after that worked
 
-    def do_open(self, options):
-        self._path = options.get('path')
-        self._tag = options.get('tag')
-        self.ready()
+            written = 0
+            while data is not None:
+                await self.in_thread(os.write, fd, data)
+                written += len(data)
+                data = await self.read()
 
-    def do_data(self, data):
-        if self._tempfile is None:
-            # keep this bounded, in case anything unexpected goes wrong
-            for _ in range(10):
-                suffix = ''.join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789_", k=6))
-                self._temppath = f'{self._path}.cockpit-tmp.{suffix}'
-                try:
-                    fd = os.open(self._temppath, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o666)
-                    break
-                except FileExistsError:
-                    continue
-                except PermissionError as exc:
-                    raise ChannelError('access-denied') from exc
-                except FileNotFoundError as exc:
-                    # directory of path does not exist
-                    raise ChannelError('not-found') from exc
-                except OSError as exc:
-                    raise ChannelError('internal-error', message=str(exc)) from exc
+            if size is not None and written < size:
+                logger.debug('ftruncate(%s.tmp, %d)', path, written)
+                await self.in_thread(os.ftruncate, fd, written)
+
+            await self.in_thread(os.fdatasync, fd)
+
+            if tag is None:
+                # no preconditions about what currently exists or not
+                # calculate the file mode from the umask
+                os.fchmod(fd, 0o666 & ~my_umask())
+                os.rename(tmpname, path)
+                tmpname = None
+
+            elif tag == '-':
+                # the file must not exist.  file mode from umask.
+                os.fchmod(fd, 0o666 & ~my_umask())
+                os.link(tmpname, path)  # will fail if file exists
+
             else:
-                raise ChannelError('internal-error',
-                                   message=f"Could not find unique file name for replacing {self._path}")
+                # the file must exist with the given tag
+                buf = os.stat(path)
+                if tag != tag_from_stat(buf):
+                    raise ChannelError('change-conflict')
+                # chown/chmod from the existing file permissions
+                os.fchmod(fd, stat.S_IMODE(buf.st_mode))
+                os.fchown(fd, buf.st_uid, buf.st_gid)
+                os.rename(tmpname, path)
+                tmpname = None
 
-            try:
-                self._tempfile = os.fdopen(fd, 'wb')
-            except OSError:
-                # Should Not Happen™, but let's be safe and avoid fd leak
-                os.close(fd)
-                self.unlink_temppath()
-                raise
+        finally:
+            os.close(fd)
+            if tmpname is not None:
+                os.unlink(tmpname)
 
-        self._tempfile.write(data)
+        return tag_from_path(path)
 
-    def do_done(self):
-        if self._tempfile is None:
-            try:
-                os.unlink(self._path)
-            # crash on other errors, as they are unexpected
-            except FileNotFoundError:
-                pass
-        else:
-            self._tempfile.flush()
+    async def run(self, options: JsonObject) -> JsonObject:
+        path = get_str(options, 'path')
+        size = get_int(options, 'size', None)
+        tag = get_str(options, 'tag', None)
 
-            if self._tag and self._tag != tag_from_path(self._path):
-                raise ChannelError('change-conflict')
+        try:
+            # In the `size` case, .set_contents() sends the ready only after
+            # it knows that the allocate was successful.  In the case without
+            # `size`, we need to send the ready() up front in order to
+            # receive the first frame and decide if we're creating or deleting.
+            if size is not None:
+                tag = await self.set_contents(path, tag, b'', size)
+            else:
+                self.ready()
+                data = await self.read()
+                # if we get EOF right away, that's a request to delete
+                if data is None:
+                    tag = self.delete(path, tag)
+                else:
+                    tag = await self.set_contents(path, tag, data, None)
 
-            try:
-                os.rename(self._temppath, self._path)
-            # ensure to not leave the temp file behind
-            except FileNotFoundError as exc:
-                self.unlink_temppath()
-                raise ChannelError('not-found', message=str(exc)) from exc
-            except IsADirectoryError as exc:
-                self.unlink_temppath()
-                # not ideal, but the closest code we have
-                raise ChannelError('access-denied', message=str(exc)) from exc
-            except OSError as exc:
-                self.unlink_temppath()
-                raise ChannelError('internal-error', message=str(exc)) from exc
+            self.done()
+            return {'tag': tag}
 
-            self._tempfile.close()
-            self._tempfile = None
-
-        self.done()
-        self.close({'tag': tag_from_path(self._path)})
-
-    def do_close(self):
-        if self._tempfile is not None:
-            self._tempfile.close()
-            self.unlink_temppath()
-            self._tempfile = None
+        except FileNotFoundError as exc:
+            raise ChannelError('not-found') from exc
+        except FileExistsError as exc:
+            # that's from link() noticing that the target file already exists
+            raise ChannelError('change-conflict') from exc
+        except PermissionError as exc:
+            raise ChannelError('access-denied') from exc
+        except IsADirectoryError as exc:
+            # not ideal, but the closest code we have
+            raise ChannelError('access-denied', message=str(exc)) from exc
+        except OSError as exc:
+            raise ChannelError('internal-error', message=str(exc)) from exc
 
 
-class FsWatchChannel(Channel):
+class FsWatchChannel(Channel, PathWatchListener):
     payload = 'fswatch1'
-    _tag = None
-    _path = None
+    _tag: 'str | None' = None
     _watch = None
 
     # The C bridge doesn't send the initial event, and the JS calls read()
@@ -253,7 +274,7 @@ class FsWatchChannel(Channel):
     _active = False
 
     @staticmethod
-    def mask_to_event_and_type(mask):
+    def mask_to_event_and_type(mask: InotifyEvent) -> 'tuple[str, str | None]':
         if (InotifyEvent.CREATE or InotifyEvent.MOVED_TO) in mask:
             return 'created', 'directory' if InotifyEvent.ISDIR in mask else 'file'
         elif InotifyEvent.MOVED_FROM in mask or InotifyEvent.DELETE in mask or InotifyEvent.DELETE_SELF in mask:
@@ -265,7 +286,7 @@ class FsWatchChannel(Channel):
         else:
             return 'changed', None
 
-    def do_inotify_event(self, mask, _cookie, name):
+    def do_inotify_event(self, mask: InotifyEvent, _cookie: int, name: 'bytes | None') -> None:
         logger.debug("do_inotify_event(%s): mask %X name %s", self._path, mask, name)
         event, type_ = self.mask_to_event_and_type(mask)
         if name:
@@ -281,14 +302,14 @@ class FsWatchChannel(Channel):
             self._tag = tag
             self.send_json(event=event, path=self._path, tag=self._tag, type=type_)
 
-    def do_identity_changed(self, fd, err):
+    def do_identity_changed(self, fd: 'int | None', err: 'int | None') -> None:
         logger.debug("do_identity_changed(%s): fd %s, err %s", self._path, str(fd), err)
         self._tag = tag_from_fd(fd) if fd else '-'
         if self._active:
             self.send_json(event='created' if fd else 'deleted', path=self._path, tag=self._tag)
 
-    def do_open(self, options):
-        self._path = options['path']
+    def do_open(self, options: JsonObject) -> None:
+        self._path = get_str(options, 'path')
         self._tag = None
 
         self._active = False
@@ -297,9 +318,10 @@ class FsWatchChannel(Channel):
 
         self.ready()
 
-    def do_close(self):
-        self._watch.close()
-        self._watch = None
+    def do_close(self) -> None:
+        if self._watch is not None:
+            self._watch.close()
+            self._watch = None
         self.close()
 
 
@@ -381,12 +403,12 @@ class FsInfoChannel(Channel, PathWatchListener):
         if reset:
             if set(self.current_value) & set(updates):
                 # if we have an overlap, we need to do a proper reset
-                self.send_json({name: None for name in self.current_value}, partial=True)
+                self.send_json(dict.fromkeys(self.current_value), partial=True)
                 self.current_value = {'partial': True}
                 updates.update(partial=None)
             else:
                 # otherwise there's no overlap: we can just remove the old keys
-                updates.update({key: None for key in self.current_value})
+                updates.update(dict.fromkeys(self.current_value))
 
         json_merge_and_filter_patch(self.current_value, updates)
         if updates:
@@ -405,11 +427,17 @@ class FsInfoChannel(Channel, PathWatchListener):
 
         if self.targets:
             info['targets'] = targets = {}
+            # 'targets' is used to report attributes about the ultimate target
+            # of symlinks, but only if this information would not already be
+            # reported.  As such, we exclude '.' and any path which would end
+            # up in 'entries' (if it existed).  '..' needs special treatment:
+            # it might be `.interesting()` but it won't be in 'entries', so
+            # it's always treated as a target.
             for name in {e.get('target') for e in entries.values() if isinstance(e, dict)}:
-                if isinstance(name, str) and ('/' in name or not self.interesting(name)):
-                    # if this target is a string that we wouldn't otherwise
-                    # report, then report it via our "targets" attribute.
-                    targets[name] = self.getattrs(self.fd, name, Follow.YES)
+                if isinstance(name, str) and name != '.':
+                    # exclude anything that would end up in 'entries'
+                    if (name == '..' or '/' in name or not self.interesting(name)):
+                        targets[name] = self.getattrs(self.fd, name, Follow.YES)
 
         self.send_update({'info': info}, reset=reset)
 
@@ -534,6 +562,7 @@ class FsInfoChannel(Channel, PathWatchListener):
             try:
                 fd = Handle.open(self.path, os.O_PATH if self.follow else os.O_PATH | os.O_NOFOLLOW)
             except OSError as exc:
+                assert exc.errno  # noqa: PT017 - mypy thinks that errno can be None
                 self.report_error(exc.errno)
             else:
                 self.report_initial_state(fd)

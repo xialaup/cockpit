@@ -14,11 +14,12 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
 import React from "react";
+import client from "../client.js";
 
 import { CardBody, CardHeader, CardTitle } from '@patternfly/react-core/dist/esm/components/Card/index.js';
 import { Checkbox } from "@patternfly/react-core/dist/esm/components/Checkbox/index.js";
@@ -32,13 +33,18 @@ import { EmptyState, EmptyStateBody } from "@patternfly/react-core/dist/esm/comp
 
 import { check_missing_packages, install_missing_packages, Enum as PkEnum } from "packagekit";
 import { fmt_to_fragments } from "utils.jsx";
+import kernelopt_sh from "kernelopt.sh";
+
 import { remember_passphrase } from "../anaconda.jsx";
 
 import {
     dialog_open,
     SelectOneRadio, TextInput, PassInput, Skip
 } from "../dialog.jsx";
-import { decode_filename, encode_filename, get_block_mntopts, block_name, for_each_async, get_children, parse_options, unparse_options, edit_crypto_config } from "../utils.js";
+import {
+    decode_filename, encode_filename, get_block_mntopts, block_name, for_each_async, get_children,
+    parse_options, extract_option, unparse_options, edit_crypto_config
+} from "../utils.js";
 import { StorageButton } from "../storage-controls.jsx";
 
 import clevis_luks_passphrase_sh from "./clevis-luks-passphrase.sh";
@@ -52,13 +58,13 @@ const _ = cockpit.gettext;
 function clevis_add(block, pin, cfg, passphrase) {
     const dev = decode_filename(block.Device);
     return cockpit.spawn(["clevis", "luks", "bind", "-f", "-k", "-", "-d", dev, pin, JSON.stringify(cfg)],
-                         { superuser: true, err: "message" }).input(passphrase);
+                         { superuser: "require", err: "message" }).input(passphrase);
 }
 
 function clevis_remove(block, key) {
     // clevis-luks-unbind needs a tty on stdin for some reason.
     return cockpit.spawn(["clevis", "luks", "unbind", "-d", decode_filename(block.Device), "-s", key.slot, "-f"],
-                         { superuser: true, pty: true, err: "message" });
+                         { superuser: "require", pty: true, err: "message" });
 }
 
 export function clevis_recover_passphrase(block, just_type) {
@@ -68,26 +74,55 @@ export function clevis_recover_passphrase(block, just_type) {
         args.push("--type");
     args.push(dev);
     return cockpit.script(clevis_luks_passphrase_sh, args,
-                          { superuser: true, err: "message" })
+                          { superuser: "require", err: "message" })
             .then(output => output.trim());
 }
 
-function clevis_unlock(block) {
+async function clevis_unlock(client, block, luksname, readonly) {
     const dev = decode_filename(block.Device);
-    const clear_dev = "luks-" + block.IdUUID;
-    return cockpit.spawn(["clevis", "luks", "unlock", "-d", dev, "-n", clear_dev],
-                         { superuser: true });
+    const clear_dev = luksname || "luks-" + block.IdUUID;
+
+    if (readonly) {
+        // HACK - clevis-luks-unlock can not unlock things readonly.
+        // But see https://github.com/latchset/clevis/pull/317 (merged
+        // Feb 2023, unreleased as of Feb 2024).
+        const passphrase = await clevis_recover_passphrase(block, false);
+        const crypto = client.blocks_crypto[block.path];
+        const unlock_options = { "read-only": { t: "b", v: readonly } };
+        await crypto.Unlock(passphrase, unlock_options);
+        return;
+    }
+
+    await cockpit.spawn(["clevis", "luks", "unlock", "-d", dev, "-n", clear_dev],
+                        { superuser: "require" });
 }
 
-export async function unlock_with_type(client, block, passphrase, passphrase_type) {
+export async function unlock_with_type(client, block, passphrase, passphrase_type, override_readonly) {
     const crypto = client.blocks_crypto[block.path];
+    let readonly = false;
+    let luksname = null;
+
+    for (const c of block.Configuration) {
+        if (c[0] == "crypttab") {
+            const options = parse_options(decode_filename(c[1].options.v));
+            readonly = extract_option(options, "readonly") || extract_option(options, "read-only");
+            luksname = decode_filename(c[1].name.v);
+            break;
+        }
+    }
+
+    if (override_readonly !== null && override_readonly !== undefined)
+        readonly = override_readonly;
+
+    const unlock_options = { "read-only": { t: "b", v: readonly } };
+
     if (passphrase) {
-        await crypto.Unlock(passphrase, {});
+        await crypto.Unlock(passphrase, unlock_options);
         remember_passphrase(block, passphrase);
     } else if (passphrase_type == "stored") {
-        await crypto.Unlock("", {});
+        await crypto.Unlock("", unlock_options);
     } else if (passphrase_type == "clevis") {
-        await clevis_unlock(block);
+        await clevis_unlock(client, block, luksname, readonly);
     } else {
         // This should always be caught and should never show up in the UI
         throw new Error("No passphrase");
@@ -100,18 +135,18 @@ export async function unlock_with_type(client, block, passphrase, passphrase_typ
 function passphrase_add(block, new_passphrase, old_passphrase) {
     const dev = decode_filename(block.Device);
     return cockpit.spawn(["cryptsetup", "luksAddKey", dev],
-                         { superuser: true, err: "message" }).input(old_passphrase + "\n" + new_passphrase);
+                         { superuser: "require", err: "message" }).input(old_passphrase + "\n" + new_passphrase);
 }
 
 function passphrase_change(block, key, new_passphrase, old_passphrase) {
     const dev = decode_filename(block.Device);
     return cockpit.spawn(["cryptsetup", "luksChangeKey", dev, "--key-slot", key.slot.toString()],
-                         { superuser: true, err: "message" }).input(old_passphrase + "\n" + new_passphrase + "\n");
+                         { superuser: "require", err: "message" }).input(old_passphrase + "\n" + new_passphrase + "\n");
 }
 
 function slot_remove(block, slot, passphrase) {
     const dev = decode_filename(block.Device);
-    const opts = { superuser: true, err: "message" };
+    const opts = { superuser: "require", err: "message" };
     const cmd = ["cryptsetup", "luksKillSlot", dev, slot.toString()];
     if (passphrase === false) {
         cmd.splice(2, 0, "-q");
@@ -128,7 +163,7 @@ function slot_remove(block, slot, passphrase) {
 function passphrase_test(block, passphrase) {
     const dev = decode_filename(block.Device);
     return (cockpit.spawn(["cryptsetup", "luksOpen", "--test-passphrase", dev],
-                          { superuser: true, err: "message" }).input(passphrase)
+                          { superuser: "require", err: "message" }).input(passphrase)
             .then(() => true)
             .catch(() => false));
 }
@@ -187,7 +222,8 @@ export function init_existing_passphrase(block, just_type, callback) {
     return {
         title: _("Unlocking disk"),
         func: dlg => {
-            return get_existing_passphrase(block, just_type).then(passphrase => {
+            const backing = client.blocks[block.CryptoBackingDevice];
+            return get_existing_passphrase(backing || block, just_type).then(passphrase => {
                 if (!passphrase)
                     dlg.set_values({ needs_explicit_passphrase: true });
                 if (callback)
@@ -263,7 +299,7 @@ function ensure_package_installed(steps, progress, package_name) {
 }
 
 function ensure_initrd_clevis_support(steps, progress, package_name) {
-    const task = cockpit.spawn(["lsinitrd", "-m"], { superuser: true, err: "message" });
+    const task = cockpit.spawn(["lsinitrd", "-m"], { superuser: "require", err: "message" });
     progress(_("Checking for NBDE support in the initrd"), () => task.close());
     return task.then(data => {
         progress(null, null);
@@ -276,7 +312,7 @@ function ensure_initrd_clevis_support(steps, progress, package_name) {
                                 // dracut doesn't react to SIGINT, so let's not enable our Cancel button
                                 progress(_("Regenerating initrd"), null);
                                 return cockpit.spawn(["dracut", "--force", "--regenerate-all"],
-                                                     { superuser: true, err: "message" });
+                                                     { superuser: "require", err: "message" });
                             }
                         });
                     });
@@ -286,8 +322,8 @@ function ensure_initrd_clevis_support(steps, progress, package_name) {
 
 function ensure_root_nbde_support(steps, progress) {
     progress(_("Adding rd.neednet=1 to kernel command line"), null);
-    return cockpit.spawn(["grubby", "--update-kernel=ALL", "--args=rd.neednet=1"],
-                         { superuser: true, err: "message" })
+    return cockpit.script(kernelopt_sh, ["set", "rd.neednet=1"],
+                          { superuser: "require", err: "message" })
             .then(() => ensure_initrd_clevis_support(steps, progress, "clevis-dracut"));
 }
 
@@ -340,7 +376,7 @@ function ensure_systemd_unit_enabled(steps, progress, name, package_name) {
                     return ensure_package_installed(steps, progress, package_name);
                 } else
                     return cockpit.spawn(["systemctl", "enable", name],
-                                         { superuser: true, err: "message" });
+                                         { superuser: "require", err: "message" });
             });
 }
 
@@ -351,6 +387,7 @@ function ensure_non_root_nbde_support(steps, progress, client, block) {
             .then(() => ensure_crypto_option(steps, progress, client, block, "_netdev"));
 }
 
+/** @type (client: any, path: string) => boolean */
 function contains_rootfs(client, path) {
     const block = client.blocks[path];
     const crypto = client.blocks_crypto[path];
@@ -385,13 +422,13 @@ function ensure_nbde_support_dialog(steps, client, block, url, adv, old_key, exi
         Title: _("Add Network Bound Disk Encryption"),
         Body: (
             <TextContent>
-                <Text compmonent={TextVariants.p}>
+                <Text component={TextVariants.p}>
                     { steps.is_root
                         ? _("The system does not currently support unlocking the root filesystem with a Tang keyserver.")
                         : _("The system does not currently support unlocking a filesystem with a Tang keyserver during boot.")
                     }
                 </Text>
-                <Text compmonent={TextVariants.p}>
+                <Text component={TextVariants.p}>
                     {_("These additional steps are necessary:")}
                 </Text>
                 <TextList>

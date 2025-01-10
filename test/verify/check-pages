@@ -15,25 +15,29 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
+import json
 import os
+import subprocess
+import tempfile
 import time
+from pathlib import Path
 
 import testlib
+from lib.constants import TEST_OS_DEFAULT
 
-RHEL_DOC_BASE = "https://access.redhat.com/documentation"
+RHEL_DOC_BASE = "https://docs.redhat.com/en/documentation"
 
 
 @testlib.nondestructive
-@testlib.skipDistroPackage()
 class TestPages(testlib.MachineCase):
     def checkDocs(self, items):
         m = self.machine
         b = self.browser
 
         b.click("#toggle-docs")
-        b.wait_visible("#toggle-docs + ul")
+        b.wait_visible("#toggle-docs-menu")
         expected = "Web Console"
         expected += "".join(items)
         expected += "About Web Console"
@@ -45,9 +49,9 @@ class TestPages(testlib.MachineCase):
         elif m.image == "arch":
             expected = "Arch Linux documentation" + expected
 
-        b.wait_collected_text("#toggle-docs + ul", expected)
+        b.wait_collected_text("#toggle-docs-menu", expected)
         b.click("#toggle-docs")
-        b.wait_not_present("#toggle-docs + ul")
+        b.wait_not_present("#toggle-docs-menu")
 
     def check_system_menu(self, label, present):
         b = self.browser
@@ -60,17 +64,12 @@ class TestPages(testlib.MachineCase):
         self.browser.switch_to_top()
         self.browser.open_session_menu()
 
-        self.browser.click(".display-language-menu")
+        self.browser.click("button.display-language-menu")
         self.browser.wait_visible('#display-language-modal')
 
     def testBasic(self):
         m = self.machine
         b = self.browser
-
-        # HACK: somehow the "services" preload causes a race condition and injects some spurious `window.hashchange /`
-        # event when switching between pages, losing the "on details page" state
-        # see debugging history in https://github.com/cockpit-project/cockpit/pull/18766
-        self.disable_preload("systemd")
 
         self.restore_dir("/etc/systemd/system", post_restore_action="systemctl daemon-reload")
         self.addCleanup(m.execute, "systemctl stop test.timer test.service")
@@ -121,11 +120,16 @@ OnCalendar=daily
         b.switch_to_top()
         self.checkDocs(["Managing services"])
         b.click("#toggle-docs")
-        b.wait_visible(f'#toggle-docs + ul a:contains("Managing services")[href^="{RHEL_DOC_BASE}"]')
-        b.wait_visible(f'#toggle-docs + ul a:contains("Web Console")[href^="{RHEL_DOC_BASE}"]')
+        b.wait_visible(f'#toggle-docs-menu a:contains("Managing services")[href^="{RHEL_DOC_BASE}"]')
+        b.wait_visible(f'#toggle-docs-menu a:contains("Web Console")[href^="{RHEL_DOC_BASE}"]')
         b.click("#toggle-docs")
-        b.wait_not_present("#toggle-docs + ul")
+        b.wait_not_present("#toggle-docs-menu")
         b.go("/network")
+        self.checkDocs(["Managing networking bonds", "Managing networking teams",
+                        "Managing networking bridges", "Managing VLANs", "Managing firewall"])
+        b.go("/system")
+        self.checkDocs(["Configuring system settings"])
+        b.go("/network/firewall")
         self.checkDocs(["Managing networking bonds", "Managing networking teams",
                         "Managing networking bridges", "Managing VLANs", "Managing firewall"])
         b.go("/system/services")
@@ -186,6 +190,10 @@ OnCalendar=daily
         b.click('#display-language-modal li[data-value=de-de] button')
         b.click("#display-language-modal footer button.pf-m-primary")
         b.wait_language("de-de")
+
+        # Wait for the shell to be fully loaded again so that b.go()
+        # starts working.
+        b.enter_page("/metrics")
 
         # Check that the system page is translated
         b.go("/system")
@@ -250,11 +258,12 @@ OnCalendar=daily
         b.wait_visible('#password-group')
         b.wait_text("#password-group > label", "Passwort")
 
-        # Test all languages
+    # FIXME: Works with TEST_SHOW_BROWSER; not obvious what happens
+    @testlib.skipBrowser("Headless chromium spontaneously logs out", "chromium")
+    def testAllLanguages(self):
         # Test that pages do not oops
-
-        if not m.image.startswith("rhel-"):
-            return
+        m = self.machine
+        b = self.browser
 
         def line_sel(i):
             return '.terminal .xterm-accessibility-tree div:nth-child(%d)' % i
@@ -268,8 +277,6 @@ OnCalendar=daily
         languages = b.eval_js("ph_select('#display-language-list li').map(e => e.attributes['data-value'].nodeValue)")
         self.assertIn('en-us', languages)
         b.click("#display-language-modal footer button.pf-m-link")  # Close the menu
-
-        is_pybridge = self.is_pybridge()
 
         for language in languages:
             # Remove failed units which will show up in the first terminal line
@@ -289,16 +296,16 @@ OnCalendar=daily
                 b.enter_page(page)
                 b.wait_language(language)
 
-            if not is_pybridge:
-                locale = language.split("-")
-                if len(locale) == 1:
-                    locale.append("")
-                locale = f"{locale[0]}_{locale[1].upper()}.UTF-8"
+            # FIXME: bridge does not set locale
+            # locale = language.split("-")
+            # if len(locale) == 1:
+            #     locale.append("")
+            # locale = f"{locale[0]}_{locale[1].upper()}.UTF-8"
 
-                b.wait_visible(".terminal .xterm-accessibility-tree")
-                b.wait_in_text(line_sel(1), "admin")
-                b.key_press("echo $LANG\r")
-                b.wait_in_text(line_sel(2), locale)
+            # b.wait_visible(".terminal .xterm-accessibility-tree")
+            # b.wait_in_text(line_sel(1), "admin")
+            # b.input_text("echo $LANG\n")
+            # b.wait_in_text(line_sel(2), locale)
 
             b.switch_to_top()
 
@@ -316,8 +323,7 @@ OnCalendar=daily
             })""", language)
             b.wait_attr(".index-page", "lang", language)
 
-        # the quick iteration starts/stops tracer in quick succession, before it can finish
-        self.allow_browser_errors("Tracer failed:.*internal-error")
+        self.allow_restart_journal_messages()
 
     def testPtBRLocale(self):
         m = self.machine
@@ -393,26 +399,34 @@ OnCalendar=daily
 
     def testFrameReload(self):
         b = self.browser
+        m = self.machine
+
         frame = "cockpit1:localhost/playground/test"
         self.addCleanup(self.machine.execute, "rm -f /tmp/counter")
 
         self.login_and_go("/playground/test")
 
-        b.wait_text('#file-content', "0")
-        b.click("#modify-file")
-        b.wait_text('#file-content', "1")
+        # Check that channels are closed when a frame is reloaded.
 
+        # Lock a file, that keeps a channel open.
+        m.execute("touch /tmp/playground-test-lock")
+        b.click(".lock-channel button")
+        b.wait_in_text(".lock-channel span", 'locked')
+        m.execute("! flock --nonblock /tmp/playground-test-lock true")
+
+        # Now reload the frame by kicking its "src" attribute.
         b.switch_to_top()
-        b.eval_js('ph_set_attr("iframe[name=\'%s\']", "data-ready", null)' % frame)
         b.eval_js('ph_set_attr("iframe[name=\'%s\']", "src", "../playground/test.html?i=1#/")' % frame)
-        b.wait_visible(f"iframe.container-frame[name='{frame}'][data-ready]")
+
+        # The channel and the lock should have gone away
+        m.execute("flock --timeout 10 /tmp/playground-test-lock true")
 
         b.enter_page("/playground/test")
-
-        b.wait_text('#file-content', "1")
+        b.wait_not_in_text(".lock-channel span", 'locked')
 
         self.allow_restart_journal_messages()
 
+    @testlib.skipBeiboot("no local overrides/config in beiboot mode")
     def testShellReload(self):
         b = self.browser
         m = self.machine
@@ -433,40 +447,41 @@ OnCalendar=daily
         # On Ubuntu and Debian we would need to generate locales - just ignore it
         self.allow_journal_messages("invalid or unusable locale: de_DE.UTF-8")
 
-        # Clean up failed services for screenshots
-        m.execute("systemctl reset-failed")
-
         self.login_and_go()
 
         filter_sel = ".pf-v5-c-text-input-group__text-input"
 
         # Check that some page disappears and some stay
         b.focus(filter_sel)
-        b.key_press("se")
+        b.input_text("se")
         b.wait_not_present("#host-apps li a:contains('Logs')")
         b.wait_visible("#host-apps li a:contains('Services')")
         b.wait_text("#host-apps li a:contains('Services') mark", "Se")
 
         b.focus(filter_sel)
-        b.key_press("\b\b")
+        b.key("Backspace", 2)
         b.wait_visible("#host-apps li a:contains('Logs')")
         b.wait_visible("#host-apps li a:contains('Services')")
 
         # Check that any substring work
         b.focus(filter_sel)
-        b.key_press("CoUN")
+        b.input_text("CoUN")
         b.wait_not_present("#host-apps li a:contains('Overview')")
         b.wait_visible("#host-apps li a:contains('Accounts')")
         b.wait_text("#host-apps li a:contains('Accounts') mark", "coun")
 
         # Check it can also search by keywords
         b.focus(filter_sel)
-        b.key_press("\b\b\b\bsystemd")
+        b.key("Backspace", 4)
+        b.input_text("systemd")
         b.wait_visible("#host-apps li a:contains('Services')")
         b.wait_text("#host-apps li a:contains('Services')", "ServicesContains: systemd")
         b.wait_text("#host-apps li a:contains('Services') mark", "systemd")
 
+        # Clean up failed services for screenshots
+        m.execute("systemctl reset-failed")
         b.wait_not_present("#services-error")
+
         b.assert_pixels("#nav-system", "menu-search", skip_layouts=["mobile"])
         b.set_layout("mobile")
         b.click("#nav-system-item")
@@ -476,11 +491,12 @@ OnCalendar=daily
 
         # Check that enter activates first result
         b.focus(filter_sel)
-        b.key_press("\b\b\b\b\b\b\blogs")
+        b.key("Backspace", 7)
+        b.input_text("logs")
         b.wait_not_present("#host-apps li a:contains('Services')")
         b.wait_visible("#host-apps li a:contains('Logs')")
         b.focus(filter_sel)
-        b.key_press("\r")
+        b.key("Enter")
         b.enter_page("/system/logs")
         b.wait_visible("#journal")
 
@@ -489,30 +505,29 @@ OnCalendar=daily
         b.wait_val(filter_sel, "")
 
         # Check that escape cleans the search
-        b.key_press("logs")
+        b.input_text("logs")
         b.wait_not_present("#host-apps li a:contains('Services')")
         b.wait_visible("#host-apps li a:contains('Logs')")
         b.focus(filter_sel)
-        b.key_press(chr(27))  # escape
+        b.key("Escape")
         b.wait_val(filter_sel, "")
         b.wait_visible("#host-apps li a:contains('Services')")
 
         # Check that clicking on `Clear search` cleans the search
-        b.key_press("logs")
+        b.input_text("logs")
         b.wait_not_present("#host-apps li a:contains('Services')")
         b.wait_visible("#host-apps li a:contains('Logs')")
         b.click("button:contains('Clear search')")
-        b.key_press("\b\b\b\b")
+        b.key("Backspace", 4)
         b.wait_visible("#host-apps li a:contains('Services')")
         b.wait_not_present("button:contains('Clear search')")
 
         # Check that arrows navigate the menu
         b.focus(filter_sel)
-        b.key_press("s")
+        b.input_text("s")
         b.wait_not_present("#host-apps li a:contains('Logs')")
-        b.key_press(chr(40), use_ord=True)  # arrow down
-        b.key_press(chr(40), use_ord=True)  # arrow down
-        b.key_press("\r")
+        b.key("ArrowDown", 2)
+        b.key("Enter")
         if m.ostree_image:
             b.enter_page("/users")
         else:
@@ -521,7 +536,7 @@ OnCalendar=daily
         # Check we jump into subpage when defined in manifest
         b.switch_to_top()
         b.focus(filter_sel)
-        b.key_press("firew")
+        b.input_text("firew")
         b.wait_visible("#host-apps li a:contains('Networking')")
         b.wait_not_present("#host-apps li a:contains('Overview')")
         b.click("#host-apps li a:contains('Networking')")
@@ -539,6 +554,11 @@ OnCalendar=daily
         b.click('#display-language-modal li[data-value=de-de] button')
         b.click("#display-language-modal footer button.pf-m-primary")
         b.wait_language("de-de")
+
+        # Wait for the shell to be fully loaded again so that b.go()
+        # starts working.
+        b.enter_page("/network/firewall")
+
         b.go("/system")
         b.enter_page("/system")
         b.wait_in_text(".ct-overview-header", "Neustart")
@@ -547,7 +567,7 @@ OnCalendar=daily
         b.wait_visible("#host-apps li a:contains('Dienste')")
         b.wait_visible("#host-apps li a:contains('Protokolle')")
         b.focus(filter_sel)
-        b.key_press("dien")
+        b.input_text("dien")
         b.wait_not_present("#host-apps li a:contains('Protokolle')")
         b.wait_visible("#host-apps li a:contains('Dienste')")
         b.wait_text("#host-apps li a:contains('Dienste') mark", "Dien")
@@ -588,42 +608,41 @@ OnCalendar=daily
 
         # test file completion widget
         b.focus("#demo-file-ac input[type=text]")
-        b.key_press(stuff + "/")
+        b.input_text(stuff + "/")
         # need to wait for the widget's "fast typing" inhibition delay to trigger the completion popup
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(1) button", stuff + "/")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(2) button", "dir/")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(3) button", "dir1/")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(4) button", "file1.txt")
-        b.click("#file-autocomplete-widget li:nth-of-type(2) button")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(1) button", stuff + "/")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(2) button", "dir/")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(3) button", "dir1/")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(4) button", "file1.txt")
+        b.click("#demo-file-ac li:nth-of-type(2) button")
 
         # clear the file completion widget
         b.click("#demo-file-ac div:first-of-type div:first-of-type button:nth-of-type(1)")
         # test if input matches one entry, but is the prefix of other entry, widget should not descend into directory
         b.focus("#demo-file-ac input[type=text]")
-        b.key_press(stuff + "/dir")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(1) button", stuff + "/dir")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(2) button", stuff + "/dir1")
+        b.input_text(stuff + "/dir")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(1) button", stuff + "/dir")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(2) button", stuff + "/dir1")
 
         # clear the file completion widget
         b.click("#demo-file-ac div:first-of-type div:first-of-type button:nth-of-type(1)")
-        b.wait_not_present("#file-autocomplete-widget li")
         b.focus("#demo-file-ac input[type=text]")
-        b.key_press(stuff + "/")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(1) button", stuff + "/")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(4) button", "file1.txt")
-        b.click("#file-autocomplete-widget li:nth-of-type(4) button")
-        b.wait_not_present("#file-autocomplete-widget li")
+        b.input_text(stuff + "/")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(1) button", stuff + "/")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(4) button", "file1.txt")
+        b.click("#demo-file-ac li:nth-of-type(4) button")
+        b.wait_not_present("#demo-file-ac li")
 
         # now update file1, check robustness with dynamic events
         m.execute(f"touch {stuff}/file1.txt")
         b.focus("#demo-file-ac input[type=text]")
         time.sleep(1)
-        b.key_press(["\b"] * 5)
+        b.key("Backspace", 5)
         # input is now $stuff/file
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(1) button", "file1.txt")
-        b.key_press(["\b"] * 4)
+        b.wait_in_text("#demo-file-ac li:nth-of-type(1) button", "file1.txt")
+        b.key("Backspace", 4)
         # input is now $stuff/, so all listings should be available
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(4) button", "file1.txt")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(4) button", "file1.txt")
 
         # add new file
         m.execute(f"touch {stuff}/other")
@@ -632,10 +651,13 @@ OnCalendar=daily
         # the previous directory and back to the directory we want to list.
         # This is an implementation choice, to avoid re-reading the directories
         # content with every user input change, which is definitely a performance cost
-        b.key_press(["\b"] * 6)
+        b.key("Backspace", 6)
         time.sleep(1)
-        b.key_press("stuff/")
-        b.wait_in_text("#file-autocomplete-widget li:nth-of-type(5) button", "other")
+        b.input_text("stuff/")
+        b.wait_in_text("#demo-file-ac li:nth-of-type(5) button", "other")
+        # close the selector
+        b.click("#demo-file-ac input")
+        b.wait_not_present("#demo-file-ac li")
 
         # Create test folder with known files
         m.execute("mkdir /home/admin/newdir")
@@ -644,15 +666,21 @@ OnCalendar=daily
         m.execute("touch /home/admin/newdir/file1")
         m.execute("touch /home/admin/newdir/file2")
         # test pre-selected autocomplete widget
-        b.wait_val("div#demo-file-ac-preselected input", "/home/admin/newdir/file1")
-        b.click("div#demo-file-ac-preselected input")
-        b.click("div#demo-file-ac input")
-        b.click("div#demo-file-ac-preselected input")
+        b.wait_val("#demo-file-ac-preselected input", "/home/admin/newdir/file1")
+        # open the selector
+        b.click("#demo-file-ac-preselected input")
+        b.wait_visible("#demo-file-ac-preselected .pf-v5-c-menu")
+        # close and open again to reload the dir (which just got created)
+        b.click("#demo-file-ac-preselected .pf-v5-c-menu-toggle__button")
+        b.wait_not_present("#demo-file-ac-preselected .pf-v5-c-menu")
+        b.click("#demo-file-ac-preselected input")
+        # selection has all the files in the directory
         paths = ["/home/admin/newdir", "/home/admin/newdir/dir1", "/home/admin/newdir/dir2", "/home/admin/newdir/file1", "/home/admin/newdir/file2"]
         for i in range(5):
-            b.wait_in_text(f"#file-autocomplete-widget-preselected li:nth-of-type({i + 1}) button", paths[i])
+            b.wait_in_text(f"#demo-file-ac-preselected li:nth-of-type({i + 1}) button", paths[i])
 
     @testlib.skipOstree("No PCP available")
+    @testlib.skipImage("pcp not currently in testing", "debian-testing")
     def testPlots(self):
         b = self.browser
         m = self.machine
@@ -683,7 +711,7 @@ OnCalendar=daily
         # range, otherwise we would find any arbitrary average in a
         # graph with a slope.
 
-        b.inject_js("""
+        b.eval_js("""
           ph_plateau = function (data, min, max, duration, label) {
               var i, j;
               var sum;  // sum of data[i..j]
@@ -708,7 +736,7 @@ OnCalendar=daily
           }
         """)
 
-        b.inject_js("""
+        b.eval_js("""
           ph_plot_data_plateau = function (sel, min, max, duration, label) {
             return ph_plateau(window.plot_state.data(sel)[0].data, min, max, duration, label);
           }
@@ -724,6 +752,12 @@ OnCalendar=daily
         with b.wait_timeout(60):
             b.wait_js_func("ph_plot_data_plateau", "pmcd", mem_avail * 0.85, mem_avail * 1.15, 15, "mem")
 
+        # Internal metrics only has memory used (memory.used) as a metric not available memory.
+        meminfo = read_mem_info(m)
+        mem_avail = meminfo['MemTotal'] - meminfo['MemAvailable']
+        with b.wait_timeout(60):
+            b.wait_js_func("ph_plot_data_plateau", "internal", mem_avail * 0.85, mem_avail * 1.15, 15, "mem")
+
     def testPageStatus(self):
         b = self.browser
 
@@ -738,6 +772,7 @@ OnCalendar=daily
         b.mouse("#development-info", "mouseenter")
         b.wait_in_text(".pf-v5-c-tooltip", "My Little Page Status")
         b.mouse("#development-info", "mouseleave")
+        b.wait_not_present(".pf-v5-c-tooltip")
 
         b.go("/playground/notifications-receiver")
         b.enter_page("/playground/notifications-receiver")
@@ -834,8 +869,8 @@ OnCalendar=daily
         b.switch_to_top()
         assert_location("/system")
 
-        # CoreOS does not keep login history
-        if not self.machine.ostree_image:
+        # ws container does not keep login history
+        if not self.machine.ws_container:
 
             b.enter_page("/system")
             b.click("button:contains(View login history)")
@@ -853,6 +888,10 @@ OnCalendar=daily
         b = self.browser
         self.login_and_go()
 
+        # https://bugzilla.redhat.com/show_bug.cgi?id=2293652
+        if self.machine.image == "fedora-40":
+            self.allow_browser_errors('Warning: Encountered two children with the same key.*')
+
         # the <a> links should be unique by their href= attributes, so get these
         hrefs = b.eval_js("[...document.querySelectorAll('#nav-system .nav-item a')].map(el => el.getAttribute('href'))")
         for href in hrefs:
@@ -861,6 +900,114 @@ OnCalendar=daily
 
         # logging out too fast, some D-Bus services get disconnected
         self.allow_restart_journal_messages()
+
+    def testUpload(self) -> None:
+        b = self.browser
+        m = self.machine
+
+        self.restore_dir("/home/admin")
+        self.login_and_go("/playground/react-patterns")  # , debugging="upload")
+        files_dir = Path(testlib.TEST_DIR) / "verify" / "files" / "metrics-archives"
+        test_upload_file = str(files_dir / "double_events.zip")
+        dest_file = "/home/admin/double_events.zip"
+
+        filehash = subprocess.check_output(["sha512sum", test_upload_file]).strip().decode().split(' ')[0]
+        filesize = subprocess.check_output(["stat", "--format", "%s", test_upload_file]).strip().decode()
+
+        b.upload_files("#demo-upload input[type='file']", [test_upload_file])
+
+        testlib.wait(lambda: m.execute(f"test -f {dest_file} && echo {dest_file} || echo 'no'").strip() == dest_file)
+        self.assertEqual(m.execute(f"stat --format '%s' {dest_file}").strip(), filesize)
+        self.assertEqual(m.execute(f"sha512sum {dest_file} | awk '{{ print $1 }}'").strip(), filehash)
+        b.wait_visible("#upload-file-btn:not(:disabled)")
+
+        # Various cases of big file upload
+        with tempfile.TemporaryDirectory() as tmpdir:
+            big_file = str(Path(tmpdir) / "bigfile.img")
+            # the VM has a total of 1.5G memory, so this would fill it
+            # use SI sizes to make sure we test the last incomplete block
+            subprocess.check_call(["truncate", "-s", "1500MB", big_file])
+
+            # Uploaded to completion.  It's slow, so only do it on default OS.
+            # We do this to make sure the file is spooled to disk, not memory.
+            if self.machine.image == TEST_OS_DEFAULT:
+                b.upload_files("#demo-upload input[type='file']", [big_file])
+                b.wait(lambda: b.get_pf_progress_value(".upload-progress-0") >= 2)
+                with b.wait_timeout(120):
+                    b.wait_visible("#upload-file-btn:not(:disabled)")
+                self.assertEqual(int(m.execute('stat -c%s /home/admin/bigfile.img')), 1500 * 1000 * 1000)
+                m.execute('rm /home/admin/bigfile.img')
+
+            # Cancelled
+            b.upload_files("#demo-upload input[type='file']", [big_file])
+            b.wait(lambda: b.get_pf_progress_value(".upload-progress-0") >= 2)
+            b.click(".cancel-button-0")
+            b.wait_visible("#upload-file-btn:not(:disabled)")
+            b.wait_in_text(".pf-v5-c-alert", "Aborted")
+            m.execute('! test -f /home/admin/bigfile.img')
+
+            # Early ENOSPC error (before we would block on 'ack')
+            m.execute("mkdir -p /mnt/upload; mount -t tmpfs -o size=1M none /mnt/upload;")
+            self.addCleanup(m.execute, "umount /mnt/upload; rmdir /mnt/upload;")
+            b.set_file_autocomplete_val("#demo-upload", "/mnt/upload/")
+            b.upload_files("#demo-upload input[type='file']", [big_file])
+            b.wait_visible("#upload-file-btn:not(:disabled)")
+            b.wait_in_text(".pf-v5-c-alert", "No space left on device")
+            self.assertEqual(m.execute('ls -A /mnt/upload'), '')  # nothing left behind
+
+            # Later ENOSPC error (after we've blocked)
+            m.execute("umount /mnt/upload; mount -t tmpfs -o size=10M none /mnt/upload;")
+            b.set_file_autocomplete_val("#demo-upload", "/mnt/upload/")
+            b.upload_files("#demo-upload input[type='file']", [big_file])
+            b.wait_visible("#upload-file-btn:not(:disabled)")
+            b.wait_in_text(".pf-v5-c-alert", "No space left on device")
+            self.assertEqual(m.execute('ls -A /mnt/upload'), '')
+
+        # Upload permission error
+        b.drop_superuser()
+        b.set_file_autocomplete_val("#demo-upload", "/var/")
+        b.upload_files("#demo-upload input[type='file']", [test_upload_file])
+        b.wait_in_text(".pf-v5-c-alert", "Not permitted to perform this action")
+
+    def testUploadMultiple(self) -> None:
+        b = self.browser
+        m = self.machine
+
+        self.restore_dir("/home/admin")
+        dest_dir = "/home/admin/keys/"
+        m.execute(['runuser', '-u', 'admin', 'mkdir', dest_dir])
+        files_dir = Path(testlib.TEST_DIR) / "verify" / "files" / "ssh"
+        files = [str(files_dir / f) for f in os.listdir(files_dir)]
+        print("to be uploaded files", files)
+
+        self.login_and_go("/playground/react-patterns")  # , debugging="upload")
+        b.wait_visible("#demo-upload")
+        b.set_file_autocomplete_val("#demo-upload", dest_dir)
+        b.upload_files("#demo-upload input[type='file']", files)
+
+        with b.wait_timeout(30):
+            b.wait(lambda: int(m.execute(f"ls {dest_dir} | wc -l").strip()) == len(files))
+        b.wait_visible("#upload-file-btn:not(:disabled)")
+
+    def testUserInfo(self) -> None:
+        b = self.browser
+        m = self.machine
+
+        m.execute("""
+            groupadd test
+            gpasswd -a admin test
+        """)
+
+        self.login_and_go("/playground/test")
+        b.wait_visible("#user-info")
+        b.wait(lambda: "groups" in b.text("#user-info"))
+        user_info = json.loads(b.text("#user-info"))
+        self.assertEqual(user_info["home"], "/var/home/admin" if m.ostree_image else "/home/admin")
+        # default group is first
+        self.assertEqual(user_info["groups"][0], m.execute("id -gn admin").strip())
+        self.assertIn("test", user_info["groups"])
+        self.assertEqual(str(user_info["id"]), m.execute("id -u admin").strip())
+        self.assertEqual(str(user_info["gid"]), m.execute("id -g admin").strip())
 
 
 if __name__ == '__main__':

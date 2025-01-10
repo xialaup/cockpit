@@ -14,11 +14,16 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
 import client from "../client.js";
+
+import React from "react";
+import { FormHelperText } from "@patternfly/react-core/dist/esm/components/Form/index.js";
+import { HelperText, HelperTextItem, } from "@patternfly/react-core/dist/esm/components/HelperText/index.js";
+import { ExclamationTriangleIcon, InfoCircleIcon } from "@patternfly/react-icons";
 
 import {
     encode_filename,
@@ -31,10 +36,10 @@ import {
     dialog_open,
     TextInput, PassInput, CheckBoxes, SelectOne,
     TeardownMessage,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 import { init_existing_passphrase, unlock_with_type } from "../crypto/keyslots.jsx";
-import { initial_tab_options, mount_explanation } from "../block/format-dialog.jsx";
+import { initial_tab_options } from "../block/format-dialog.jsx";
 
 import {
     is_mounted, get_fstab_config,
@@ -52,18 +57,72 @@ export const mount_options = (opt_ro, extra_options, is_visible) => {
                               extra: extra_options || false
                           },
                           fields: [
-                              { title: _("Mount read only"), tag: "ro" },
+                              {
+                                  title: _("Mount read only"),
+                                  tag: "ro",
+                              },
                               { title: _("Custom mount options"), tag: "extra", type: "checkboxWithInput" },
                           ]
                       });
 };
 
+export const mount_explanation = {
+    local:
+    <FormHelperText>
+        <HelperText>
+            <HelperTextItem hasIcon>
+                {_("Mounts before services start")}
+            </HelperTextItem>
+            <HelperTextItem hasIcon>
+                {_("Appropriate for critical mounts, such as /var")}
+            </HelperTextItem>
+            <HelperTextItem hasIcon icon={<ExclamationTriangleIcon className="ct-icon-exclamation-triangle" />}>
+                {_("Boot fails if filesystem does not mount, preventing remote access")}
+            </HelperTextItem>
+        </HelperText>
+    </FormHelperText>,
+    nofail:
+    <FormHelperText>
+        <HelperText>
+            <HelperTextItem hasIcon>
+                {_("Mounts in parallel with services")}
+            </HelperTextItem>
+            <HelperTextItem hasIcon icon={<InfoCircleIcon className="ct-icon-info-circle" />}>
+                {_("Boot still succeeds when filesystem does not mount")}
+            </HelperTextItem>
+        </HelperText>
+    </FormHelperText>,
+    netdev:
+    <FormHelperText>
+        <HelperText>
+            <HelperTextItem hasIcon>
+                {_("Mounts in parallel with services, but after network is available")}
+            </HelperTextItem>
+            <HelperTextItem hasIcon icon={<InfoCircleIcon className="ct-icon-info-circle" />}>
+                {_("Boot still succeeds when filesystem does not mount")}
+            </HelperTextItem>
+        </HelperText>
+    </FormHelperText>,
+    never:
+    <FormHelperText>
+        <HelperText>
+            <HelperTextItem hasIcon>
+                {_("Does not mount during boot")}
+            </HelperTextItem>
+            <HelperTextItem hasIcon>
+                {_("Useful for mounts that are optional or need interaction (such as passphrases)")}
+            </HelperTextItem>
+        </HelperText>
+    </FormHelperText>,
+};
+
 export const at_boot_input = (at_boot, is_visible) => {
+    const init = at_boot || (client.in_anaconda_mode() ? "local" : "nofail");
     return SelectOne("at_boot", _("At boot"),
                      {
                          visible: vals => !client.in_anaconda_mode() && (!is_visible || is_visible(vals)),
-                         value: at_boot,
-                         explanation: mount_explanation[at_boot],
+                         value: init,
+                         explanation: mount_explanation[init],
                          choices: [
                              {
                                  value: "local",
@@ -84,6 +143,11 @@ export const at_boot_input = (at_boot, is_visible) => {
                          ]
                      });
 };
+
+export function update_at_boot_input(dlg, vals, trigger) {
+    if (trigger == "at_boot")
+        dlg.set_options("at_boot", { explanation: mount_explanation[vals.at_boot] });
+}
 
 export function mounting_dialog(client, block, mode, forced_options, subvol) {
     const block_fsys = client.blocks_fsys[block.path];
@@ -107,7 +171,7 @@ export function mounting_dialog(client, block, mode, forced_options, subvol) {
 
     const is_filesystem_mounted = is_mounted(client, block, subvol);
 
-    function maybe_update_config(new_dir, new_opts, passphrase, passphrase_type) {
+    function maybe_update_config(new_dir, new_opts, passphrase, passphrase_type, crypto_unlock_readonly) {
         let new_config = null;
         let all_new_opts;
 
@@ -182,16 +246,32 @@ export function mounting_dialog(client, block, mode, forced_options, subvol) {
                 return Promise.resolve();
         }
 
-        function maybe_unlock() {
-            const crypto = client.blocks_crypto[block.path];
-            if (mode == "mount" && crypto) {
-                return (unlock_with_type(client, block, passphrase, passphrase_type)
-                        .catch(error => {
-                            dlg.set_values({ needs_explicit_passphrase: true });
-                            return Promise.reject(error);
-                        }));
-            } else
-                return Promise.resolve();
+        async function maybe_unlock() {
+            if (mode == "mount" || (mode == "update" && is_filesystem_mounted)) {
+                let crypto = client.blocks_crypto[block.path];
+                const backing = client.blocks[block.CryptoBackingDevice];
+
+                if (backing && block.ReadOnly != crypto_unlock_readonly) {
+                    // We are working on a open crypto device, but it
+                    // has the wrong readonly-ness. Close it so that we can reopen it below.
+                    crypto = client.blocks_crypto[backing.path];
+                    await crypto.Lock({});
+                }
+
+                if (crypto) {
+                    try {
+                        await unlock_with_type(client, client.blocks[crypto.path],
+                                               passphrase, passphrase_type, crypto_unlock_readonly);
+                        return await client.wait_for(() => client.blocks_cleartext[crypto.path]);
+                    } catch (error) {
+                        passphrase_type = null;
+                        dlg.set_values({ needs_explicit_passphrase: true });
+                        throw error;
+                    }
+                }
+            }
+
+            return block;
         }
 
         function maybe_lock() {
@@ -214,14 +294,14 @@ export function mounting_dialog(client, block, mode, forced_options, subvol) {
         return (reload_systemd()
                 .then(() => teardown_active_usage(client, usage))
                 .then(maybe_unlock)
-                .then(() => {
+                .then(content_block => {
                     if (!old_config && new_config)
-                        return (block.AddConfigurationItem(new_config, {})
+                        return (content_block.AddConfigurationItem(new_config, {})
                                 .then(maybe_mount));
                     else if (old_config && !new_config)
-                        return block.RemoveConfigurationItem(old_config, {});
+                        return content_block.RemoveConfigurationItem(old_config, {});
                     else if (old_config && new_config)
-                        return (block.UpdateConfigurationItem(old_config, new_config, {})
+                        return (content_block.UpdateConfigurationItem(old_config, new_config, {})
                                 .then(maybe_mount));
                     else if (new_config && !is_mounted(client, block))
                         return maybe_mount();
@@ -253,18 +333,17 @@ export function mounting_dialog(client, block, mode, forced_options, subvol) {
                                                                 mode == "update",
                                                                 subvol)
                       }),
-            mount_options(opt_ro, extra_options),
+            mount_options(opt_ro, extra_options, null),
             at_boot_input(at_boot),
         ];
 
-        if (block.IdUsage == "crypto" && mode == "mount")
-            fields = fields.concat([
-                PassInput("passphrase", _("Passphrase"),
-                          {
-                              visible: vals => vals.needs_explicit_passphrase,
-                              validate: val => !val.length && _("Passphrase cannot be empty"),
-                          })
-            ]);
+        fields = fields.concat([
+            PassInput("passphrase", _("Passphrase"),
+                      {
+                          visible: vals => vals.needs_explicit_passphrase,
+                          validate: val => !val.length && _("Passphrase cannot be empty"),
+                      })
+        ]);
     }
 
     const mode_title = {
@@ -311,13 +390,25 @@ export function mounting_dialog(client, block, mode, forced_options, subvol) {
 
     const usage = get_active_usage(client, block.path, null, null, false, subvol);
 
+    function update_explicit_passphrase(vals_ro) {
+        const backing = client.blocks[block.CryptoBackingDevice];
+        let need_passphrase = (block.IdUsage == "crypto" && mode == "mount");
+        if (backing) {
+            // XXX - take subvols into account.
+            if (block.ReadOnly != vals_ro)
+                need_passphrase = true;
+        }
+        dlg.set_values({ needs_explicit_passphrase: need_passphrase && !passphrase_type });
+    }
+
     const dlg = dialog_open({
         Title: cockpit.format(mode_title[mode], old_dir_for_display),
         Fields: fields,
-        Teardown: TeardownMessage(usage, old_dir),
+        Teardown: TeardownMessage(usage, old_dir || true),
         update: function (dlg, vals, trigger) {
-            if (trigger == "at_boot")
-                dlg.set_options("at_boot", { explanation: mount_explanation[vals.at_boot] });
+            update_at_boot_input(dlg, vals, trigger);
+            if (trigger == "mount_options")
+                update_explicit_passphrase(vals.mount_options.ro);
         },
         Action: {
             Title: mode_action[mode],
@@ -341,10 +432,13 @@ export function mounting_dialog(client, block, mode, forced_options, subvol) {
                         opts = opts.concat(forced_options);
                     if (vals.mount_options?.extra)
                         opts = opts.concat(parse_options(vals.mount_options.extra));
+                    // XXX - take subvols into account.
+                    const crypto_unlock_readonly = vals.mount_options?.ro ?? opt_ro;
                     return (maybe_update_config(client.add_mount_point_prefix(vals.mount_point),
                                                 unparse_options(opts),
                                                 vals.passphrase,
-                                                passphrase_type)
+                                                passphrase_type,
+                                                crypto_unlock_readonly)
                             .then(() => maybe_set_crypto_options(vals.mount_options?.ro,
                                                                  opts.indexOf("noauto") == -1,
                                                                  vals.at_boot == "nofail",
@@ -353,10 +447,11 @@ export function mounting_dialog(client, block, mode, forced_options, subvol) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage, old_dir),
-            (block.IdUsage == "crypto" && mode == "mount")
-                ? init_existing_passphrase(block, true, type => { passphrase_type = type })
-                : null
+            init_teardown_usage(client, usage, old_dir || true),
+            init_existing_passphrase(block, true, type => {
+                passphrase_type = type;
+                update_explicit_passphrase(dlg.get_value("mount_options")?.ro ?? opt_ro);
+            }),
         ]
     });
 }

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import React from "react";
@@ -31,7 +31,7 @@ import {
 } from "../crypto/keyslots.jsx";
 import {
     dialog_open, SizeSlider, BlockingMessage, TeardownMessage, SelectSpaces,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 import { std_reply } from "../stratis/utils.jsx";
 import { pvs_to_spaces } from "../lvm2/utils.jsx";
@@ -267,7 +267,7 @@ export function get_resize_info(client, block, to_fit) {
                                                      block.IdType);
                 }
             }
-        } else if (client.blocks_stratis_blockdev[block.path] && client.features.stratis_grow_blockdevs) {
+        } else if (client.blocks_stratis_blockdev[block.path]) {
             info = {
                 can_shrink: false,
                 can_grow: true,
@@ -534,7 +534,7 @@ export function grow_dialog(client, lvol_or_part, info, to_fit) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage),
+            init_teardown_usage(client, usage),
             passphrase_fields.length
                 ? init_existing_passphrase(block, false, pp => { recovered_passphrase = pp })
                 : null
@@ -647,7 +647,7 @@ export function shrink_dialog(client, lvol_or_part, info, to_fit) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage),
+            init_teardown_usage(client, usage),
             passphrase_fields.length
                 ? init_existing_passphrase(block, false, pp => { recovered_passphrase = pp })
                 : null

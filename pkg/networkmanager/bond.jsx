@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import React, { useState, useContext } from 'react';
@@ -148,7 +148,7 @@ export const BondDialog = ({ connection, dev, settings }) => {
                                           variant='link'
                                           isInline
                                           icon={<ExternalLinkSquareAltIcon />} iconPosition="right"
-                                          href="https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/managing_systems_using_the_rhel_9_web_console/configuring-network-bonds-using-the-web-console_system-management-using-the-rhel-9-web-console">
+                                          href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_and_managing_networking/configuring-network-bonding_configuring-and-managing-networking#proc_configuring-a-network-bond-by-using-the-rhel-web-console_configuring-network-bonding">
                                       {_("Learn more")}
                                   </Button>
                               }

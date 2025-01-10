@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 /* STORAGE DIALOGS
@@ -225,7 +225,6 @@ import { DataList, DataListCell, DataListCheck, DataListItem, DataListItemCells,
 import { Form, FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { Grid, GridItem } from "@patternfly/react-core/dist/esm/layouts/Grid/index.js";
 import { Radio } from "@patternfly/react-core/dist/esm/components/Radio/index.js";
-import { Select as TypeAheadSelect, SelectOption } from "@patternfly/react-core/dist/esm/deprecated/components/Select/index.js";
 import { Slider } from "@patternfly/react-core/dist/esm/components/Slider/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
 import { Split } from "@patternfly/react-core/dist/esm/layouts/Split/index.js";
@@ -235,14 +234,21 @@ import { HelperText, HelperTextItem } from "@patternfly/react-core/dist/esm/comp
 import { List, ListItem } from "@patternfly/react-core/dist/esm/components/List/index.js";
 import { ExclamationTriangleIcon, InfoIcon, HelpIcon, EyeIcon, EyeSlashIcon } from "@patternfly/react-icons";
 import { InputGroup } from "@patternfly/react-core/dist/esm/components/InputGroup/index.js";
+import { Table, Tbody, Tr, Td } from '@patternfly/react-table';
 
+import { TypeaheadSelect } from "cockpit-components-typeahead-select";
 import { show_modal_dialog, apply_modal_dialog } from "cockpit-components-dialog.jsx";
 import { ListingTable } from "cockpit-components-table.jsx";
 import { FormHelper } from "cockpit-components-form-helper";
 
-import { fmt_size, block_name, format_size_and_text, format_delay, for_each_async } from "./utils.js";
+import {
+    decode_filename, fmt_size, block_name, format_size_and_text, format_delay, for_each_async, get_byte_units,
+    is_available_block, BTRFS_TOOL_MOUNT_PATH
+} from "./utils.js";
 import { fmt_to_fragments } from "utils.jsx";
 import client from "./client.js";
+
+import fsys_is_empty_sh from "./fsys-is-empty.sh";
 
 const _ = cockpit.gettext;
 
@@ -255,8 +261,8 @@ function is_visible(field, values) {
     return !field.options || field.options.visible == undefined || field.options.visible(values);
 }
 
-const Row = ({ field, values, errors, onChange }) => {
-    const { tag, title, options } = field;
+const Field = ({ field, values, errors, onChange }) => {
+    const { tag, options } = field;
 
     if (!is_visible(field, values))
         return null;
@@ -270,10 +276,31 @@ const Row = ({ field, values, errors, onChange }) => {
         onChange(tag);
     }
 
-    const field_elts = field.render(values[tag], change, validated, error);
-    const nested_elts = (options && options.nested_fields
-        ? make_rows(options.nested_fields, values, errors, onChange)
-        : []);
+    return (
+        <>
+            {field.render(values[tag], change, validated, error)}
+            <FormHelper helperText={explanation} helperTextInvalid={validated && error} />
+        </>);
+};
+
+const Row = ({ field, values, errors, onChange }) => {
+    const { title, options } = field;
+
+    if (!is_visible(field, values))
+        return null;
+
+    const field_elts = <Field field={field} values={values} errors={errors} onChange={onChange} />;
+    let nested_elts = [];
+    if (options && options.nested_fields) {
+        if (field.is_group)
+            nested_elts = options.nested_fields.map(f => <Field key={f.tag}
+                                                                field={f}
+                                                                values={values}
+                                                                errors={errors}
+                                                                onChange={onChange} />);
+        else
+            nested_elts = make_rows(options.nested_fields, values, errors, onChange);
+    }
 
     if (title || title == "") {
         let titleLabel = title;
@@ -289,15 +316,13 @@ const Row = ({ field, values, errors, onChange }) => {
             <FormGroup label={titleLabel} hasNoPaddingTop={field.hasNoPaddingTop}>
                 { field_elts }
                 { nested_elts }
-                <FormHelper helperText={explanation} helperTextInvalid={validated && error} />
             </FormGroup>
         );
     } else if (!field.bare) {
         return (
-            <FormGroup validated={validated} hasNoPaddingTop={field.hasNoPaddingTop}>
+            <FormGroup hasNoPaddingTop={field.hasNoPaddingTop}>
                 { field_elts }
                 { nested_elts }
-                <FormHelper helperText={explanation} helperTextInvalid={validated && error} />
             </FormGroup>
         );
     } else
@@ -328,6 +353,19 @@ const Body = ({ body, teardown, fields, values, errors, isFormHorizontal, onChan
     );
 };
 
+const ExtraConfirmation = ({ text, onChange }) => {
+    const [confirmed, setConfirmed] = useState(false);
+
+    return (
+        <Checkbox isChecked={confirmed}
+                  id="dialog-confirm"
+                  label={text}
+                  onChange={(_, val) => {
+                      setConfirmed(val);
+                      onChange(val);
+                  }} />);
+};
+
 function flatten_fields(fields) {
     return fields.reduce(
         (acc, val) => acc.concat([val]).concat(val.options && val.options.nested_fields
@@ -340,6 +378,8 @@ export const dialog_open = (def) => {
     const nested_fields = def.Fields || [];
     const fields = flatten_fields(nested_fields);
     const values = { };
+    let confirmation = null;
+    let confirmed = false;
     let errors = null;
 
     fields.forEach(f => { values[f.tag] = f.initial_value });
@@ -415,8 +455,10 @@ export const dialog_open = (def) => {
                 caption: variant.Title,
                 style: actions.length == 0 ? "primary" : "secondary",
                 danger: def.Action.Danger || def.Action.DangerButton,
-                disabled: running_promise != null || (def.Action.disable_on_error &&
-                                                      errors && errors.toString() != "[object Object]"),
+                disabled: (running_promise != null ||
+                           (def.Action.disable_on_error &&
+                            errors && errors.toString() != "[object Object]") ||
+                           (confirmation && !confirmed)),
                 clicked: progress_callback => run_action(progress_callback, variant.tag),
             });
         }
@@ -436,13 +478,19 @@ export const dialog_open = (def) => {
             }
         }
 
-        const extra = (
-            <div>
-                { def.Action && def.Action.Danger
-                    ? <HelperText><HelperTextItem variant="error">{def.Action.Danger} </HelperTextItem></HelperText>
-                    : null
-                }
-            </div>);
+        let extra = null;
+        if (confirmation) {
+            extra = <ExtraConfirmation text={confirmation}
+                                       onChange={val => {
+                                           confirmed = val;
+                                           update_footer();
+                                       }} />;
+        } else if (def.Action && def.Action.Danger) {
+            extra = (
+                <div>
+                    <HelperText><HelperTextItem variant="error">{def.Action.Danger} </HelperTextItem></HelperText>
+                </div>);
+        }
 
         return {
             idle_message: (running_promise
@@ -537,6 +585,14 @@ export const dialog_open = (def) => {
             update();
         },
 
+        need_confirmation: (conf) => {
+            confirmation = conf;
+            confirmed = false;
+            def.Action.Danger = null;
+            def.Action.DangerButton = true;
+            update_footer();
+        },
+
         close: () => {
             dlg.footerProps.dialog_done();
         }
@@ -613,24 +669,17 @@ export const PassInput = (tag, title, options) => {
     };
 };
 
-const TypeAheadSelectElement = ({ options, change }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [value, setValue] = useState(options.value);
-
+const TypeAheadSelectElement = ({ value, options, change }) => {
     return (
-        <TypeAheadSelect
-            variant="typeahead"
-            isCreatable
-            createText={_("Use")}
-            id="nfs-path-on-server"
-            isOpen={isOpen}
-            selections={value}
-            onToggle={(_event, isOpen) => setIsOpen(isOpen)}
-            onSelect={(event, value) => { setValue(value); change(value) }}
-            onClear={() => setValue(false)}
-            isDisabled={options.disabled}>
-            {options.choices.map(entry => <SelectOption key={entry} value={entry} />)}
-        </TypeAheadSelect>
+        <TypeaheadSelect toggleProps={ { id: "nfs-path-on-server" } }
+                         isScrollable
+                         isCreatable
+                         createOptionMessage={val => cockpit.format(_("Use $0"), val)}
+                         selected={value}
+                         onSelect={(_, value) => change(value)}
+                         onClearSelection={() => change("")}
+                         isDisabled={options.disabled}
+                         selectOptions={options.choices.map(entry => ({ value: entry, content: entry }))} />
     );
 };
 
@@ -642,9 +691,11 @@ export const ComboBox = (tag, title, options) => {
         initial_value: options.value || "",
 
         render: (val, change, validated) => {
-            return <div data-field={tag} data-field-type="combobox">
-                <TypeAheadSelectElement options={options} change={change} />
-            </div>;
+            return (
+                <div data-field={tag} data-field-type="combobox">
+                    <TypeAheadSelectElement value={val} options={options} change={change} />
+                </div>
+            );
         }
     };
 };
@@ -680,37 +731,23 @@ export const SelectOneRadio = (tag, title, options) => {
         hasNoPaddingTop: true,
 
         render: (val, change) => {
-            return (
-                <Split hasGutter data-field={tag} data-field-type="select-radio">
-                    { options.choices.map(c => (
-                        <Radio key={c.value} isChecked={val == c.value} data-data={c.value}
+            const vertical = options?.vertical || false;
+            const fields = options.choices.map(c => (
+                <Radio key={c.value} isChecked={val == c.value} data-data={c.value}
                             id={tag + '.' + c.value}
-                            onChange={() => change(c.value)} label={c.title} />))
-                    }
-                </Split>
-            );
-        }
-    };
-};
+                            onChange={() => change(c.value)} label={c.title} />));
 
-export const SelectOneRadioVertical = (tag, title, options) => {
-    return {
-        tag,
-        title,
-        options,
-        initial_value: options.value || options.choices[0].value,
-        hasNoPaddingTop: true,
-
-        render: (val, change) => {
-            return (
-                <div data-field={tag} data-field-type="select-radio">
-                    { options.choices.map(c => (
-                        <Radio key={c.value} isChecked={val == c.value} data-data={c.value}
-                            id={tag + '.' + c.value}
-                            onChange={() => change(c.value)} label={c.title} />))
-                    }
-                </div>
-            );
+            if (vertical) {
+                return (
+                    <div data-field={tag} data-field-type="select-radio">
+                        {fields}
+                    </div>);
+            } else {
+                return (
+                    <Split hasGutter data-field={tag} data-field-type="select-radio">
+                        {fields}
+                    </Split>);
+            }
         }
     };
 };
@@ -863,11 +900,12 @@ export const SelectSpace = (tag, title, options) => {
     };
 };
 
-const CheckBoxComponent = ({ tag, val, title, tooltip, update_function }) => {
+const CheckBoxComponent = ({ tag, val, title, tooltip, disabled, update_function }) => {
     return (
         <Checkbox data-field={tag} data-field-type="checkbox"
                   id={tag}
                   isChecked={val}
+                  isDisabled={disabled}
                   label={
                       <>
                           {title}
@@ -905,6 +943,7 @@ export const CheckBoxes = (tag, title, options) => {
                                               tag={ftag}
                                               val={fval}
                                               title={field.title}
+                                              disabled={field.disabled}
                                               tooltip={field.tooltip}
                                               options={options}
                                               update_function={fchange} />;
@@ -921,6 +960,7 @@ export const CheckBoxes = (tag, title, options) => {
             if (options.fields.length == 1)
                 return fieldset;
 
+            // eslint-disable-next-line react/jsx-no-useless-fragment
             return <>{ fieldset }</>;
         }
     };
@@ -975,7 +1015,7 @@ function size_slider_round(value, round) {
 class SizeSliderElement extends React.Component {
     constructor(props) {
         super();
-        this.units = cockpit.get_byte_units(props.value || props.max);
+        this.units = get_byte_units(props.value || props.max);
         this.state = { unit: this.units.find(u => u.selected).factor };
     }
 
@@ -1109,6 +1149,18 @@ export const SizeSlider = (tag, title, options) => {
     };
 };
 
+export const Group = (title, fields) => {
+    return {
+        tag: null,
+        title,
+        is_group: true,
+        hasNoPaddingTop: true,
+        options: { nested_fields: fields },
+
+        render: (val, change) => null,
+    };
+};
+
 export const BlockingMessage = (usage) => {
     const usage_desc = {
         pvol: _("physical volume of LVM2 volume group"),
@@ -1201,12 +1253,15 @@ const teardown_block_name = use => {
         name = block_name(client.blocks[use.block.CryptoBackingDevice] || use.block);
     }
 
-    return name;
+    return name.replace(/^\/dev\//, "");
 };
 
 export const TeardownMessage = (usage, expect_single_unmount) => {
-    if (usage.length == 0)
+    if (!usage.Teardown)
         return null;
+
+    if (client.in_anaconda_mode() && !expect_single_unmount)
+        return <AnacondaTeardownMessage usage={usage} />;
 
     if (is_expected_unmount(usage, expect_single_unmount))
         return <StopProcessesMessage mount_point={expect_single_unmount} users={usage[0].users} />;
@@ -1216,6 +1271,14 @@ export const TeardownMessage = (usage, expect_single_unmount) => {
         if (use.block) {
             const name = teardown_block_name(use);
             let location = use.location;
+
+            /* Don't show mount points used internally by Cockpit.
+             * It's fine to tear them down, but we don't want people
+             * to start worrying about them.
+             */
+            if (location && location.startsWith(BTRFS_TOOL_MOUNT_PATH))
+                return;
+
             if (use.usage == "mounted") {
                 location = client.strip_mount_point_prefix(location);
                 if (location === false)
@@ -1234,6 +1297,9 @@ export const TeardownMessage = (usage, expect_single_unmount) => {
         }
     });
 
+    if (rows.length == 0)
+        return null;
+
     return (
         <div className="modal-footer-teardown">
             <p>{_("These changes will be made:")}</p>
@@ -1246,6 +1312,36 @@ export const TeardownMessage = (usage, expect_single_unmount) => {
                           ]}
                           rows={rows} />
         </div>);
+};
+
+const AnacondaTeardownMessage = ({ usage }) => {
+    const rows = [];
+
+    usage.forEach((use, index) => {
+        if (use.data_warning) {
+            const name = teardown_block_name(use);
+            const location = client.strip_mount_point_prefix(use.location) || use.block.IdLabel || "-";
+
+            rows.push(
+                <Tr key={index}>
+                    <Td className="pf-v5-u-font-weight-bold">{name}</Td>
+                    <Td>{location}</Td>
+                    <Td>{use.data_warning}</Td>
+                </Tr>);
+        }
+    });
+
+    if (rows.length > 0) {
+        return (
+            <div className="modal-footer-teardown">
+                <HelperText>
+                    <HelperTextItem variant="error">
+                        {_("Important data might be deleted:")}
+                    </HelperTextItem>
+                </HelperText>
+                <Table variant="compact" borders={false}><Tbody>{rows}</Tbody></Table>
+            </div>);
+    }
 };
 
 export function teardown_danger_message(usage, expect_single_unmount) {
@@ -1266,24 +1362,54 @@ export function teardown_danger_message(usage, expect_single_unmount) {
     }
 }
 
-export function init_active_usage_processes(client, usage, expect_single_unmount) {
+export function init_teardown_usage(client, usage, expect_single_unmount) {
     return {
-        title: _("Checking related processes"),
-        func: dlg => {
-            return for_each_async(usage, u => {
+        title: _("Checking filesystem usage"),
+        func: async function (dlg) {
+            let have_data = false;
+            for (const u of usage) {
                 if (u.usage == "mounted") {
-                    return client.find_mount_users(u.location)
-                            .then(users => {
-                                u.users = users;
-                            });
-                } else
-                    return Promise.resolve();
-            }).then(() => {
-                dlg.set_attribute("Teardown", TeardownMessage(usage, expect_single_unmount));
+                    u.users = await client.find_mount_users(u.location);
+                }
+                if (client.in_anaconda_mode() && !expect_single_unmount && u.block) {
+                    if (u.block.IdUsage == "filesystem" &&
+                        ["xfs", "ext2", "ext3", "ext4", "btrfs", "vfat", "ntfs"].indexOf(u.block.IdType) >= 0) {
+                        const empty = await cockpit.script(fsys_is_empty_sh,
+                                                           [decode_filename(u.block.PreferredDevice)],
+                                                           { superuser: "require", err: "message" });
+                        if (empty.trim() != "yes") {
+                            try {
+                                const info = JSON.parse(empty);
+                                u.data_warning = cockpit.format(_("$0 used, $1 total"),
+                                                                fmt_size((info.total - info.free) * info.unit),
+                                                                fmt_size(info.total * info.unit));
+                            } catch {
+                                u.data_warning = _("Device contains unrecognized data");
+                            }
+                        }
+                    } else if (u.block.IdUsage == "crypto" && !client.blocks_cleartext[u.block.path]) {
+                        u.data_warning = _("Locked encrypted device might contain data");
+                    } else if (!client.blocks_ptable[u.block.path] &&
+                               u.block.IdUsage != "raid" &&
+                               !is_available_block(client, u.block)) {
+                        u.data_warning = _("Device contains unrecognized data");
+                    }
+                    if (u.data_warning)
+                        have_data = true;
+                }
+            }
+
+            if (have_data) {
+                usage.Teardown = true;
+                dlg.need_confirmation(_("I confirm I want to lose this data forever"));
+            } else if (client.in_anaconda_mode() && !expect_single_unmount) {
+                dlg.need_confirmation(null);
+            } else {
                 const msg = teardown_danger_message(usage, expect_single_unmount);
                 if (msg)
                     dlg.add_danger(msg);
-            });
+            }
+            dlg.set_attribute("Teardown", TeardownMessage(usage, expect_single_unmount));
         }
     };
 }
@@ -1296,7 +1422,7 @@ export const StopProcessesMessage = ({ mount_point, users }) => {
         return {
             columns: [
                 u.pid,
-                { title: u.cmd.substr(0, 100), props: { modifier: "breakWord" } },
+                { title: u.cmd.substring(0, 100), props: { modifier: "breakWord" } },
                 u.user || "-",
                 { title: format_delay(-u.since * 1000), props: { modifier: "nowrap" } }
             ]
@@ -1307,7 +1433,7 @@ export const StopProcessesMessage = ({ mount_point, users }) => {
         return {
             columns: [
                 { title: u.unit.replace(/\.service$/, ""), props: { modifier: "breakWord" } },
-                { title: u.cmd.substr(0, 100), props: { modifier: "breakWord" } },
+                { title: u.cmd.substring(0, 100), props: { modifier: "breakWord" } },
                 { title: u.desc || "", props: { modifier: "breakWord" } },
                 { title: format_delay(-u.since * 1000), props: { modifier: "nowrap" } }
             ]
@@ -1329,7 +1455,7 @@ export const StopProcessesMessage = ({ mount_point, users }) => {
                                           { title: _("PID"), props: colprops },
                                           { title: _("Command"), props: colprops },
                                           { title: _("User"), props: colprops },
-                                          { title: _("Runtime"), props: colprops }
+                                          { title: _("Started"), props: colprops }
                                       ]
                                   }
                                       rows={process_rows} />
@@ -1349,7 +1475,7 @@ export const StopProcessesMessage = ({ mount_point, users }) => {
                                           { title: _("Service"), props: colprops },
                                           { title: _("Command"), props: colprops },
                                           { title: _("Description"), props: colprops },
-                                          { title: _("Runtime"), props: colprops }
+                                          { title: _("Started"), props: colprops }
                                       ]
                                   }
                                   rows={service_rows} />

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import '../lib/patternfly/patternfly-5-cockpit.scss';
@@ -99,11 +99,11 @@ const initStore = function(rootElement) {
                 // https://access.redhat.com/solutions/59432 states limit to be 896MiB and the auto at 768MiB max
                 // default unit is MiB
                     if (value >= 1024 * 1024)
-                        dataStore.kdumpMemory = cockpit.format_bytes(value, 1024);
+                        dataStore.kdumpMemory = value;
                     else if (value >= 1024)
-                        dataStore.kdumpMemory = cockpit.format_bytes(value * 1024, 1024);
+                        dataStore.kdumpMemory = value * 1024;
                     else
-                        dataStore.kdumpMemory = cockpit.format_bytes(value * 1024 * 1024, 1024);
+                        dataStore.kdumpMemory = value * 1024 * 1024;
                 } else {
                     dataStore.kdumpMemory = content.trim();
                 }

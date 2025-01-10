@@ -18,7 +18,7 @@
 import asyncio
 import json
 import logging
-import uuid
+import traceback
 
 from .jsonutil import JsonError, JsonObject, JsonValue, create_object, get_int, get_str, get_str_or_none, typechecked
 
@@ -39,10 +39,18 @@ class CockpitProblem(Exception):
     """
     attrs: JsonObject
 
-    def __init__(self, problem: str, _msg: 'JsonObject | None' = None, **kwargs: JsonValue) -> None:
+    def __init__(self, problem: str, msg: 'JsonObject | None' = None, **kwargs: JsonValue) -> None:
         kwargs['problem'] = problem
-        self.attrs = create_object(_msg, kwargs)
+        self.attrs = create_object(msg, kwargs)
         super().__init__(get_str(self.attrs, 'message', problem))
+
+    def get_attrs(self) -> JsonObject:
+        if self.attrs['problem'] == 'internal-error' and self.__cause__ is not None:
+            return dict(self.attrs, cause=traceback.format_exception(
+                self.__cause__.__class__, self.__cause__, self.__cause__.__traceback__
+            ))
+        else:
+            return self.attrs
 
 
 class CockpitProtocolError(CockpitProblem):
@@ -171,10 +179,10 @@ class CockpitProtocol(asyncio.Protocol):
         else:
             logger.debug('cannot write to closed transport')
 
-    def write_control(self, _msg: 'JsonObject | None' = None, **kwargs: JsonValue) -> None:
+    def write_control(self, msg: 'JsonObject | None' = None, **kwargs: JsonValue) -> None:
         """Write a control message.  See jsonutil.create_object() for details."""
-        logger.debug('sending control message %r %r', _msg, kwargs)
-        pretty = json.dumps(create_object(_msg, kwargs), indent=2) + '\n'
+        logger.debug('sending control message %r %r', msg, kwargs)
+        pretty = json.dumps(create_object(msg, kwargs), indent=2) + '\n'
         self.write_channel_data('', pretty.encode())
 
     def data_received(self, data: bytes) -> None:
@@ -195,7 +203,8 @@ class CockpitProtocol(asyncio.Protocol):
 # Helpful functionality for "server"-side protocol implementations
 class CockpitProtocolServer(CockpitProtocol):
     init_host: 'str | None' = None
-    authorizations: 'dict[str, asyncio.Future[str]] | None' = None
+    authorizations: 'dict[str, asyncio.Future[JsonObject]] | None' = None
+    next_auth_id = 0
 
     def do_send_init(self) -> None:
         raise NotImplementedError
@@ -223,12 +232,13 @@ class CockpitProtocolServer(CockpitProtocol):
         self.do_send_init()
 
     # authorize request/response API
-    async def request_authorization(
+    async def request_authorization_object(
         self, challenge: str, timeout: 'int | None' = None, **kwargs: JsonValue
-    ) -> str:
+    ) -> JsonObject:
         if self.authorizations is None:
             self.authorizations = {}
-        cookie = str(uuid.uuid4())
+        cookie = str(self.next_auth_id)
+        self.next_auth_id += 1
         future = asyncio.get_running_loop().create_future()
         try:
             self.authorizations[cookie] = future
@@ -237,12 +247,16 @@ class CockpitProtocolServer(CockpitProtocol):
         finally:
             self.authorizations.pop(cookie)
 
+    async def request_authorization(
+        self, challenge: str, timeout: 'int | None' = None, **kwargs: JsonValue
+    ) -> str:
+        return get_str(await self.request_authorization_object(challenge, timeout, **kwargs), 'response')
+
     def do_authorize(self, message: JsonObject) -> None:
         cookie = get_str(message, 'cookie')
-        response = get_str(message, 'response')
 
         if self.authorizations is None or cookie not in self.authorizations:
             logger.warning('no matching authorize request')
             return
 
-        self.authorizations[cookie].set_result(response)
+        self.authorizations[cookie].set_result(message)

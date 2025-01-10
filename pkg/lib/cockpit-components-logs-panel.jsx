@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -75,7 +75,7 @@ export class JournalOutput {
         const full_content = [time, message, ident].join("\n");
 
         return (
-            <div className="cockpit-logline" role="row" tabIndex="0" key={entry.__CURSOR}
+            <div className="cockpit-logline" role="row" tabIndex={0} key={entry.__CURSOR}
                 data-cursor={entry.__CURSOR}
                 onClick={ev => this.onEvent(ev, entry.__CURSOR, full_content)}
                 onKeyDown={ev => this.onEvent(ev, entry.__CURSOR, full_content)}>

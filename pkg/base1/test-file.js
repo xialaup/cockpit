@@ -67,6 +67,12 @@ QUnit.test("simple replace", async assert => {
     assert.equal(res, "4321\n", "correct content");
 });
 
+QUnit.test("empty replace", async assert => {
+    await cockpit.file(`${dir}/bar`).replace("");
+    const res = await cockpit.spawn(["cat", `${dir}/bar`]);
+    assert.equal(res, "", "correct content");
+});
+
 QUnit.test("stringify replace", async assert => {
     await cockpit.file(dir + "/bar", { syntax: JSON }).replace({ foo: 4321 });
     const res = await cockpit.spawn(["cat", dir + "/bar"]);
@@ -193,6 +199,28 @@ QUnit.test("modify", async assert => {
     assert.equal(n, 1, "callback called once");
 
     assert.equal(await cockpit.spawn(["cat", dir + "/quux"]), "dcba\n", "correct content");
+
+    // make sure that writing "" results in an empty file, not a deleted one
+    n = 0;
+    await file.modify(old => {
+        n += 1;
+        assert.equal(old, "dcba\n", "correct old content");
+        return "";
+    });
+    assert.equal(n, 1, "callback called once");
+
+    assert.equal(await cockpit.spawn(["cat", dir + "/quux"]), "", "correct content");
+
+    // make sure that writing null deletes the file
+    n = 0;
+    await file.modify(old => {
+        n += 1;
+        assert.equal(old, "", "correct old content");
+        return null;
+    });
+    assert.equal(n, 1, "callback called once");
+
+    assert.rejects(cockpit.spawn(["cat", dir + "/quux"]), /No such file or directory/, "file deleted");
 });
 
 QUnit.test("modify with conflict", async assert => {
@@ -326,6 +354,22 @@ QUnit.test("watching without reading", assert => {
     }, { read: false });
 });
 
+QUnit.test("watching without reading pre-created", async assert => {
+    const done = assert.async();
+    assert.expect(3);
+
+    // Pre-create fsinfo test file
+    const file = cockpit.file(dir + "/fsinfo");
+    await file.replace("1234");
+    const watch = file.watch((content, tag) => {
+        assert.equal(content, null, "non-existant because read is false");
+        assert.notEqual(tag, null, "non empty tag");
+        assert.equal(tag.startsWith("1:"), true, "tag always starts with 1:");
+        watch.remove();
+        done();
+    }, { read: false });
+});
+
 QUnit.test("watching directory", assert => {
     const done = assert.async();
     assert.expect(20);
@@ -376,6 +420,38 @@ QUnit.test("watching directory", assert => {
 
     // trigger the first event
     cockpit.spawn(["sh", "-c", `echo hello > ${dir}/world.txt`]);
+});
+
+QUnit.test("watching error", async assert => {
+    const dir = await cockpit.spawn([
+        'sh', '-c',
+        `
+           cd "$(mktemp -d)"
+           echo -n "$(pwd)"
+
+           mkdir dir
+           echo dir file > dir/dir-file.txt
+           echo do not read this > dir-file.xtx
+           chmod 0 dir
+        `
+    ]);
+
+    const file = cockpit.file(`${dir}/dir/file`);
+
+    try {
+        const [content, tag, error] = await new Promise(resolve => {
+            file.watch((content, tag, error) => {
+                resolve([content, tag, error]);
+            });
+        });
+        assert.equal(content, null);
+        assert.equal(tag, null);
+        assert.equal(error.problem, 'access-denied');
+    } finally {
+        file.close();
+        await cockpit.spawn(["chmod", "-R", "u+rwX", dir]);
+        await cockpit.spawn(["rm", "-rf", dir]);
+    }
 });
 
 QUnit.test("closing", assert => {

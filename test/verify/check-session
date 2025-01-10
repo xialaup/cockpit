@@ -15,12 +15,11 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import testlib
 
 
-@testlib.skipDistroPackage()
 @testlib.nondestructive
 class TestSession(testlib.MachineCase):
 
@@ -29,7 +28,18 @@ class TestSession(testlib.MachineCase):
         b = self.browser
 
         def wait_session(should_exist):
-            testlib.wait(lambda: (should_exist == ("admin" in m.execute("loginctl list-sessions"))))
+            if should_exist:
+                m.execute("until loginctl list-sessions | grep admin; do sleep 1; done")
+            else:
+                # restart logind to mop up empty "closing" sessions, like in testlib terminate_sessions()
+                m.execute("""while true; do
+                                 OUT=$(loginctl list-sessions)
+                                 echo "$OUT" | grep admin || break
+                                 if echo "$OUT | grep closing"; then
+                                    systemctl stop systemd-logind
+                                 fi
+                                 sleep 3
+                             done""")
 
         wait_session(should_exist=False)
 
@@ -38,14 +48,25 @@ class TestSession(testlib.MachineCase):
         wait_session(should_exist=True)
 
         # Check session type
-        if not m.ostree_image:
-            session_id = m.execute("loginctl list-sessions | awk '/admin/ {print $1}'").strip()
+        if not m.ws_container:
+            # Systemd 256 also shows a class=manager session for admin
+            session_id = m.execute("loginctl list-sessions | grep -v manager | awk '/admin/ {print $1}'").strip()
             self.assertEqual(m.execute(f"loginctl show-session -p Type {session_id}").strip(), "Type=web")
+
+        if not m.ws_container and m.image != "arch":
+            # starts ssh-agent in session
+            bridge = m.execute("pgrep -u admin cockpit-bridge").strip()
+            out = m.execute(f"grep --null-data SSH_AGENT_PID /proc/{bridge}/environ | xargs -0")
+            agent = out.split("=")[1].strip()
+            self.assertIn("ssh-agent", m.execute(f"readlink /proc/{agent}/exe").strip())
 
         # Logout
         b.logout()
         b.wait_visible("#login")
         wait_session(should_exist=False)
+
+        # cleans up ssh-agent
+        m.execute("while pgrep -u admin ssh-agent; do sleep 1; done", timeout=10)
 
         # Login again
         b.set_val("#login-user-input", "admin")
@@ -64,6 +85,35 @@ class TestSession(testlib.MachineCase):
         # Kill session from the inside
         b.logout()
         wait_session(should_exist=False)
+
+        # try to pwn $SSH_AGENT_PID via pam_env's user_readenv=1 (CVE-2024-6126)
+
+        if m.ws_container:
+            # not using cockpit's PAM config
+            return
+
+        # this is enabled by default in tools/cockpit.debian.pam, as well as
+        # Debian/Ubuntu's /etc/pam.d/sshd; but not in Fedora/RHEL
+        if "debian" not in m.image and "ubuntu" not in m.image:
+            self.write_file("/etc/pam.d/cockpit", "session required pam_env.so user_readenv=1\n", append=True)
+        victim_pid = m.spawn("sleep infinity", "sleep.log")
+        self.addCleanup(m.execute, f"kill {victim_pid} || true")
+        self.write_file("/home/admin/.pam_environment", f"SSH_AGENT_PID DEFAULT={victim_pid}\n", owner="admin")
+
+        b.login_and_go()
+        wait_session(should_exist=True)
+        # starts ssh-agent in session
+        m.execute("pgrep -u admin ssh-agent")
+        # but the session has the modified SSH_AGENT_PID
+        bridge = m.execute("pgrep -u admin cockpit-bridge").strip()
+        agent = m.execute(f"grep --null-data SSH_AGENT_PID /proc/{bridge}/environ | xargs -0 | sed 's/.*=//'").strip()
+        self.assertEqual(agent, str(victim_pid))
+
+        # logging out still kills the actual ssh-agent, not the victim pid
+        b.logout()
+        wait_session(should_exist=False)
+        m.execute("while pgrep -u admin ssh-agent; do sleep 1; done", timeout=10)
+        m.execute(f"test -e /proc/{victim_pid}")
 
 
 if __name__ == '__main__':

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -217,7 +217,7 @@ test_return_gerror_headers (TestCase *tc,
   g_hash_table_insert (headers, g_strdup ("Header1"), g_strdup ("value1"));
 
   error = g_error_new (G_IO_ERROR, G_IO_ERROR_FAILED, "Reason here: %s", "booyah");
-  cockpit_web_response_gerror (tc->response, headers, error);
+  cockpit_web_response_gerror (tc->response, headers, NULL, error);
 
   g_error_free (error);
   g_hash_table_destroy (headers);
@@ -706,6 +706,32 @@ test_chunked_zero_length (TestCase *tc,
                    "26\r\nCockpit is perfect for new sysadmins, \r\n"
                    "37\r\ninspecting journals and starting and stopping services.\r\n0\r\n\r\n");
 }
+
+static void
+test_chunked_head (TestCase *tc,
+                   gconstpointer data)
+{
+  const gchar *resp;
+
+  g_assert_cmpint (cockpit_web_response_get_state (tc->response), ==, COCKPIT_WEB_RESPONSE_READY);
+
+  cockpit_web_response_headers (tc->response, 200, "OK", -1, NULL);
+
+  g_assert_cmpint (cockpit_web_response_get_state (tc->response), ==, COCKPIT_WEB_RESPONSE_QUEUING);
+
+  while (g_main_context_iteration (NULL, FALSE));
+
+  g_assert_cmpint (cockpit_web_response_get_state (tc->response), ==, COCKPIT_WEB_RESPONSE_QUEUING);
+  cockpit_web_response_complete (tc->response);
+
+  g_assert_cmpint (cockpit_web_response_get_state (tc->response), ==, COCKPIT_WEB_RESPONSE_COMPLETE);
+
+  resp = output_as_string (tc);
+  g_assert_cmpint (cockpit_web_response_get_state (tc->response), ==, COCKPIT_WEB_RESPONSE_SENT);
+
+  g_assert_cmpstr (resp, ==, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n" STATIC_HEADERS);
+}
+
 
 static GBytes *
 bytes_static (const gchar *data)
@@ -1498,6 +1524,8 @@ main (int argc,
               setup, test_chunked_transfer_encoding, teardown);
   g_test_add ("/web-response/chunked-zero-length", TestCase, NULL,
               setup, test_chunked_zero_length, teardown);
+  g_test_add ("/web-response/chunked-head", TestCase, &fixture_head,
+              setup, test_chunked_head, teardown);
   g_test_add ("/web-response/abort", TestCase, NULL,
               setup, test_abort, teardown);
   g_test_add ("/web-response/connection-close", TestCase, &fixture_connection_close,

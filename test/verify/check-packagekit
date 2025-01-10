@@ -15,16 +15,18 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
+import fnmatch
 import os
 import time
+from collections.abc import Collection
 
 import packagelib
 import testlib
 
-OSesWithoutTracer = ["debian-stable", "debian-testing", "ubuntu-2204", "ubuntu-stable", "fedora-coreos", "rhel4edge"]
-OSesWithoutKpatch = ["debian-*", "ubuntu-*", "arch", "fedora-*", "rhel4edge", "centos-*"]
+OSesWithoutTracer = ["debian-*", "ubuntu-*", "fedora-coreos", "centos-10", "rhel-10*"]
+OSesWithoutKpatch = ["debian-*", "ubuntu-*", "arch", "fedora-*", "centos-*"]
 
 
 class NoSubManCase(packagelib.PackageCase):
@@ -50,7 +52,8 @@ class TestUpdates(NoSubManCase):
         super().setUp()
 
         # apt does not support severity enhancement metadata
-        self.supports_severity = self.backend != "apt"
+        # only PackageKit ≥ 1.2.4 dnf (https://github.com/PackageKit/PackageKit/issues/268) supports severity
+        self.supports_severity = (self.backend != "apt") and (not self.machine.image.startswith("rhel-8"))
 
         if self.supports_severity:
             self.enhancement_severity = "enhancement"
@@ -68,8 +71,9 @@ class TestUpdates(NoSubManCase):
         # make sure we don't have any extra ones
         self.assertFalse(self.browser.is_present(selector.format(len(updates) + 1)))
 
-    def check_nth_update(self, index, pkgname, version, severity="bug",
-                         num_issues=None, desc_matches=None, cves=None, bugs=None, arch=None):
+    def check_nth_update(self, index: int, pkgname: str, version: str, severity: str = "bug",
+                         num_issues: 'int | None' = None, desc_matches: Collection[str] = (),
+                         cves: Collection[str] = (), bugs: Collection[str] = (), arch: 'str | None' = None) -> str:
         """Check the contents of the package update table row at index
 
         None properties will not be tested.
@@ -93,7 +97,7 @@ class TestUpdates(NoSubManCase):
         severity_to_aria = {"bug": "bug fix", "enhancement": "enhancement", "security": "security"}
         b.wait_visible(f"{row} [data-label=Severity] .severity-icon[aria-label='{severity_to_aria[severity]}']")
         self.assertEqual(b.text(row + "[data-label=Severity]").strip(),
-                         num_issues is not None and str(num_issues) or "")
+                         '' if num_issues is None else str(num_issues))
 
         # should not be expanded by default
         self.assertNotIn("pf-m-expanded", b.attr(row, "class"))
@@ -104,7 +108,7 @@ class TestUpdates(NoSubManCase):
         desc = b.text(row + "> tr.pf-m-expanded")
 
         # details should contain all description bits, CVEs and bug numbers
-        for m in (desc_matches or []) + (cves or []) + (bugs or []):
+        for m in (*desc_matches, *cves, *bugs):
             self.assertIn(m, desc)
 
         return row
@@ -145,8 +149,7 @@ class TestUpdates(NoSubManCase):
         self.restore_file("/etc/dnf/plugins/kpatch.conf")
         m.execute("systemctl disable --now kpatch")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
 
         # Enable and install kpatch
         with b.wait_timeout(30):
@@ -268,7 +271,7 @@ echo -e "Loaded patch modules:\nkpatch_3_10_0_1062_1_1 [enabled]\n\nInstalled pa
         m = self.machine
 
         def check_status():
-            if m.image in OSesWithoutTracer:
+            if any(fnmatch.fnmatch(m.image, img) for img in OSesWithoutTracer):
                 b.wait_in_text("#status p", "System is up to date")
                 # PK starts from a blank state, thus should force refresh and set the "time since" to 0
                 b.wait_in_text("#last-checked", "Last checked: less than a minute ago")
@@ -288,8 +291,7 @@ echo -e "Loaded patch modules:\nkpatch_3_10_0_1062_1_1 [enabled]\n\nInstalled pa
         # Refresh cache so cockpit does not try to reload page
         m.execute("pkcon refresh")
 
-        m.start_cockpit()
-        b.login_and_go("/system")
+        self.login_and_go("/system")
         # status on /system front page: no repos at all, thus no updates
         self.wait_checking_updates()
         b.wait_text(self.update_text, "System is up to date")
@@ -390,7 +392,7 @@ echo -e "Loaded patch modules:\nkpatch_3_10_0_1062_1_1 [enabled]\n\nInstalled pa
 
         b.wait_visible(".pf-v5-c-empty-state__title:contains('Update was successful')")
         # if tracer is not present, reboot is recommended
-        if m.image in OSesWithoutTracer:
+        if any(fnmatch.fnmatch(m.image, img) for img in OSesWithoutTracer):
             b.wait_in_text("#app .pf-v5-c-empty-state button.pf-m-primary", "Reboot system...")
         b.click("#ignore")
 
@@ -462,8 +464,7 @@ ExecStart=/usr/local/bin/{self.packageName}
                 self.testObj.enableRepo()
 
             def test_frontend(self):
-                m.start_cockpit()
-                b.login_and_go("/updates")
+                self.testObj.login_and_go("/updates")
 
                 # check update is present
                 with b.wait_timeout(30):
@@ -498,16 +499,14 @@ ExecStart=/usr/local/bin/{self.packageName}
                         b.wait_visible("#shutdown-dialog")
                         b.click("#delay")
                         b.click("button:contains('No delay')")
-                        b.wait_text("#delay .pf-v5-c-select__toggle-text", "No delay")
+                        b.wait_text("#delay .pf-v5-c-menu-toggle__text", "No delay")
                         b.click("#shutdown-dialog button:contains('Reboot')")
                         b.switch_to_top()
                         b.wait_in_text(".curtains-ct h1", "Disconnected")
 
                         # ensure that rebooting actually worked
-                        m.wait_reboot()
-                        m.start_cockpit()
-                        b.reload()
-                        b.login_and_go("/updates")
+                        self.testObj.wait_reboot()
+                        self.testObj.login_and_go("/updates")
                     else:
                         b.wait_in_text("#status", "1 service needs to be restarted")
                         b.click("#services-need-restart button")
@@ -525,16 +524,14 @@ ExecStart=/usr/local/bin/{self.packageName}
                         b.wait_visible("#shutdown-dialog")
                         b.click("#delay")
                         b.click("button:contains('No delay')")
-                        b.wait_text("#delay .pf-v5-c-select__toggle-text", "No delay")
+                        b.wait_text("#delay .pf-v5-c-menu-toggle__text", "No delay")
                         b.click("#shutdown-dialog button:contains('Reboot')")
                         b.switch_to_top()
                         b.wait_in_text(".curtains-ct h1", "Disconnected")
 
                         # ensure that rebooting actually worked
-                        m.wait_reboot()
-                        m.start_cockpit()
-                        b.reload()
-                        b.login_and_go("/updates")
+                        self.testObj.wait_reboot()
+                        self.testObj.login_and_go("/updates")
                     else:
                         # update required a service restart
                         b.wait_not_present("#reboot-system")
@@ -603,7 +600,6 @@ ExecStart=/usr/local/bin/{self.packageName}
     @testlib.nondestructive
     def testFailServiceRestart(self):
         b = self.browser
-        m = self.machine
 
         packageName = "apple"
         scriptContent = "#!/bin/sh\nsleep infinity"
@@ -628,8 +624,7 @@ ExecStart=/usr/local/bin/{packageName}
 
         self.enableRepo()
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
 
         # check update is present
         with b.wait_timeout(30):
@@ -692,8 +687,7 @@ ExecStart=/usr/local/bin/{packageName}
         self.enableRepo()
         m.execute("pkcon refresh")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#available-updates")
         b.wait_in_text("#status", "6 updates available, including 3 security fixes")
@@ -802,22 +796,20 @@ ExecStart=/usr/local/bin/{packageName}
         b.click(".pf-v5-c-expandable-section__toggle")
         self.assertHistory(".pf-v5-c-expandable-section ul", ["buggy", "norefs-bin", "norefs-doc"])
 
-        if m.image in OSesWithoutTracer:
+        if any(fnmatch.fnmatch(m.image, img) for img in OSesWithoutTracer):
             # do the reboot; this will disconnect the web UI
             b.click("#app .pf-v5-c-empty-state button.pf-m-primary")
             b.wait_visible("#shutdown-dialog")
             b.click("#delay")
             b.click("button:contains('No delay')")
-            b.wait_text("#delay .pf-v5-c-select__toggle-text", "No delay")
+            b.wait_text("#delay .pf-v5-c-menu-toggle__text", "No delay")
             b.click("#shutdown-dialog button:contains('Reboot')")
             b.switch_to_top()
             b.wait_in_text(".curtains-ct h1", "Disconnected")
 
             # ensure that rebooting actually worked
-            m.wait_reboot()
-            m.start_cockpit()
-            b.reload()
-            b.login_and_go("/updates")
+            self.wait_reboot()
+            self.login_and_go("/updates")
         else:
             b.click("#ignore")
 
@@ -846,8 +838,7 @@ ExecStart=/usr/local/bin/{packageName}
         self.enableRepo()
         m.execute("pkcon refresh")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#available-updates")
         b.wait_in_text("#status", "1 security fix available")
@@ -877,7 +868,6 @@ ExecStart=/usr/local/bin/{packageName}
     @testlib.nondestructive
     def testInfoTruncation(self):
         b = self.browser
-        m = self.machine
 
         # update with not too many binary packages
         for i in range(4):
@@ -898,8 +888,7 @@ ExecStart=/usr/local/bin/{packageName}
 
         self.enableRepo()
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
 
         with b.wait_timeout(30):
             b.wait_in_text("table[aria-label='Available updates']", "Things change")
@@ -954,8 +943,7 @@ ExecStart=/usr/local/bin/{packageName}
         self.enableRepo()
         m.execute("pkcon refresh")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#available-updates")
         b.click("#available-updates button#install-all")
@@ -970,8 +958,7 @@ ExecStart=/usr/local/bin/{packageName}
         # reboots automatically
         b.switch_to_top()
         b.wait_in_text(".curtains-ct h1", "Disconnected")
-        m.wait_reboot()
-        self.allow_restart_journal_messages()
+        self.wait_reboot()
 
     @testlib.nondestructive
     def testUpdateError(self):
@@ -991,8 +978,7 @@ ExecStart=/usr/local/bin/{packageName}
         # break the upgrade by removing the generated packages from the repo
         m.execute(f"rm -f {self.repo_dir}/vapor*.deb {self.repo_dir}/vapor*.rpm {self.repo_dir}/vapor*.pkg*")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#available-updates")
         b.wait_in_text("#status", "1 update available")
@@ -1015,7 +1001,7 @@ ExecStart=/usr/local/bin/{packageName}
         m = self.machine
 
         # this tends to corrupt the rpm database, so do a backup/restore
-        if self.backend == 'dnf':
+        if 'dnf' in self.backend:
             # https://www.fedoraproject.org/wiki/Changes/RelocateRPMToUsr
             exists = self.machine.execute("if test -e %s; then echo yes; fi" % "/usr/lib/sysimage/rpm").strip() != ""
             if exists:
@@ -1030,8 +1016,7 @@ ExecStart=/usr/local/bin/{packageName}
         self.enableRepo()
         m.execute("pkcon refresh")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
 
         with b.wait_timeout(30):
             b.click("#available-updates button#install-all")
@@ -1061,35 +1046,20 @@ ExecStart=/usr/local/bin/{packageName}
                            mv /usr/share/dbus-1/system-services/org.freedesktop.PackageKit.service.disabled /usr/share/dbus-1/system-services/org.freedesktop.PackageKit.service
                            systemctl daemon-reload""")
 
-        m.start_cockpit()
-        if not self.is_pybridge():
-            # TODO: conditions not implemented on C bridge; once we drop it, drop this special case and
-            # enable the manifest documentation for conditions in doc/guide/packages.xml
-            self.assertIn("\nupdates", m.execute("cockpit-bridge --packages"))
-            b.login_and_go("/updates")
-
-            # error message present
-            b.wait_in_text(".pf-v5-c-page__main-section .pf-v5-l-stack .pf-v5-c-code-block__content", "PackageKit is not installed")
-
-            # update status on front page should show error
-            b.go("/system")
-            b.enter_page("/system")
-            b.wait_text(self.update_text, "Loading available updates failed")
-            self.assertIn("exclamation", b.attr(self.update_icon, "class"))
-        else:
+        # no bridge in beiboot mode
+        if not testlib.isBeibootLogin():
             self.assertNotIn("\nupdates", m.execute("cockpit-bridge --packages"))
-            # should not appear in the menu at all
-            self.login_and_go(None)
-            b.wait_in_text("#host-apps .pf-m-current", "Overview")
-            self.assertNotIn("Updates", b.text("#host-apps .pf-m-current"))
+        # should not appear in the menu at all
+        self.login_and_go(None)
+        b.wait_in_text("#host-apps .pf-m-current", "Overview")
+        self.assertNotIn("Updates", b.text("#host-apps .pf-m-current"))
 
-            # update status on front page should be invisible
-            b.go("/system")
-            b.enter_page("/system")
-            b.wait_visible(".system-health")
-            self.assertFalse(b.is_present(self.update_text))
+        # update status on front page should be invisible
+        b.go("/system")
+        b.enter_page("/system")
+        b.wait_visible(".system-health")
+        self.assertFalse(b.is_present(self.update_text))
 
-    @testlib.skipDistroPackage()
     @testlib.nondestructive
     def testUnprivileged(self):
         b = self.browser
@@ -1129,7 +1099,7 @@ ExecStart=/usr/local/bin/{packageName}
 
 
 @testlib.skipImage("TODO: Arch Linux has no cockpit-ws package, it's in cockpit", "arch")
-@testlib.skipOstree("Image uses OSTree")
+@testlib.skipWsContainer("no cockpit-ws package with cockpit/ws container")
 class TestWsUpdate(NoSubManCase):
     def testBasic(self):
         # The main case for this is that cockpit-ws itself gets upgraded, which
@@ -1150,8 +1120,7 @@ class TestWsUpdate(NoSubManCase):
         self.enableRepo()
         m.execute("pkcon refresh")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
 
         with b.wait_timeout(30):
             b.click("#available-updates button#install-all")
@@ -1204,8 +1173,7 @@ class TestKpatchInstall(NoSubManCase):
 
         m.execute("rpm --erase --verbose kpatch kpatch-dnf")
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#status")
         b.wait_in_text("#kpatch-settings", "Not available")
@@ -1236,6 +1204,7 @@ class TestKpatchInstall(NoSubManCase):
 
 
 @testlib.onlyImage("No subscriptions", "rhel-*")
+@testlib.skipBeiboot("sub-man-cockpit not contained in cockpit/ws")
 class TestUpdatesSubscriptions(packagelib.PackageCase):
     provision = {
         "0": {"address": "10.111.112.1/20", "dns": "10.111.112.1", "memory_mb": 512},
@@ -1243,10 +1212,8 @@ class TestUpdatesSubscriptions(packagelib.PackageCase):
     }
 
     def register(self):
-        # this fails with "Unable to find available subscriptions for all your installed products", but works anyway
         self.machine.execute(
-            "LC_ALL=C.UTF-8 subscription-manager register --serverurl https://services.cockpit.lan:8443/candlepin --org=admin --activationkey=awesome_os_pool || true")
-        self.machine.execute("LC_ALL=C.UTF-8 subscription-manager attach --auto")
+            "LC_ALL=C.UTF-8 subscription-manager register --org=donaldduck --activationkey=awesome_os_pool")
 
     def setUp(self):
         super().setUp()
@@ -1264,8 +1231,8 @@ class TestUpdatesSubscriptions(packagelib.PackageCase):
         self.candlepin.download("/home/admin/candlepin/generated_certs/88888.pem", product_file)
 
         # # upload product info to the test machine
-        m.execute("mkdir -p /etc/pki/product")
-        m.upload([product_file], "/etc/pki/product")
+        m.execute("mkdir -p /etc/pki/product-default")
+        m.upload([product_file], "/etc/pki/product-default")
 
         # set up CA
         ca = self.candlepin.execute("cat /home/admin/candlepin/certs/candlepin-ca.crt")
@@ -1280,13 +1247,19 @@ class TestUpdatesSubscriptions(packagelib.PackageCase):
         self.update_text = "#page_status_notification_updates"
         self.update_text_action = "#page_status_notification_updates a"
 
+        # setup the repositories properly using the candlepin RPM GPG key
+        m.execute("curl -o /etc/pki/rpm-gpg/RPM-GPG-KEY-candlepin http://services.cockpit.lan:8080/RPM-GPG-KEY-candlepin")
+        m.execute("subscription-manager config --rhsm.baseurl http://services.cockpit.lan:8080")
+
+        # perform the additional configuration of subscription-manager
+        m.execute(
+            "subscription-manager config --server.hostname services.cockpit.lan --server.port 8443 --server.prefix /candlepin")
+
     def testNoUpdates(self):
-        m = self.machine
         b = self.browser
 
         # fresh machine, no updates available; by default our rhel-* images are not registered
-        m.start_cockpit()
-        b.login_and_go("/system")
+        self.login_and_go("/system")
         # show unregistered status on system front page
         with b.wait_timeout(30):
             b.wait_in_text(self.update_text, "Not registered")
@@ -1319,7 +1292,6 @@ class TestUpdatesSubscriptions(packagelib.PackageCase):
         b.wait_text(self.update_text, "System is up to date")
 
     def testAvailableUpdates(self):
-        m = self.machine
         b = self.browser
 
         # one available update
@@ -1327,9 +1299,7 @@ class TestUpdatesSubscriptions(packagelib.PackageCase):
         self.createPackage("vanilla", "1.0", "2")
         self.enableRepo()
 
-        m.start_cockpit()
-
-        b.login_and_go("/system")
+        self.login_and_go("/system")
         # by default our rhel-* images are not registered; show warning on system page
         with b.wait_timeout(30):
             b.wait_in_text(self.update_text, "Not registered")
@@ -1375,8 +1345,7 @@ class TestUpdatesSubscriptions(packagelib.PackageCase):
         self.enableRepo()
         m.execute("pkcon refresh")
 
-        m.start_cockpit()
-        b.login_and_go("/system")
+        self.login_and_go("/system")
         with b.wait_timeout(30):
             b.wait_text(self.update_text, "System is up to date")
 
@@ -1393,10 +1362,13 @@ class TestAutoUpdates(NoSubManCase):
     def setUp(self):
         super().setUp()
         # not implemented for apt yet, only dnf
-        self.supported_backend = self.backend in ["dnf"]
-        if self.backend == 'dnf':
-            self.restore_file("/etc/dnf/automatic.conf")
-            self.addCleanup(self.machine.execute, "systemctl disable --now dnf-automatic-install.timer 2>/dev/null; rm -rf /etc/systemd/system/dnf-automatic-*")
+        self.supported_backend = "dnf" in self.backend
+        if self.backend == "dnf5":
+            self.timer_unit = "dnf5-automatic"
+            self.config = "/etc/dnf/dnf5-plugins/automatic.conf"
+        elif self.backend == "dnf4":
+            self.timer_unit = "dnf-automatic-install"
+            self.config = "/etc/dnf/automatic.conf"
 
     def closeSettings(self, browser):
         browser.click("#automatic-updates-dialog button:contains('Save changes')")
@@ -1407,8 +1379,7 @@ class TestAutoUpdates(NoSubManCase):
         b = self.browser
         m = self.machine
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#status")
 
@@ -1418,7 +1389,7 @@ class TestAutoUpdates(NoSubManCase):
             return
 
         def assertTimerDnf(hour, dow):
-            out = m.execute("systemctl --no-legend list-timers dnf-automatic-install.timer")
+            out = m.execute(f"systemctl --no-legend list-timers {self.timer_unit}.timer")
             if hour:
                 # don't test the minutes, due to RandomizedDelaySec=60m
                 self.assertRegex(out, f" {hour}:")
@@ -1431,42 +1402,42 @@ class TestAutoUpdates(NoSubManCase):
                 self.assertNotIn(" day", out)
 
             # service should not run right away
-            self.assertEqual(m.execute("systemctl is-active dnf-automatic-install.service || true").strip(), "inactive")
+            self.assertEqual(m.execute(f"systemctl is-active {self.timer_unit}.service || true").strip(), "inactive")
 
             # automatic reboots should be enabled whenever timer is enabled
-            out = m.execute("systemctl cat dnf-automatic-install.service")
+            out = m.execute(f"systemctl cat {self.timer_unit}.service")
             if hour:
-                if m.image.startswith("rhel-8") or m.image == "centos-8-stream":
+                if m.image.startswith("rhel-8"):
                     # for RHEL 8, dnf-automatic does not support reboot; we have a unit drop-in hack
                     self.assertRegex(out, "ExecStartPost=/.*shutdown")
                     # validate our assumption
-                    self.assertNotIn("reboot", m.execute("cat /etc/dnf/automatic.conf"))
+                    self.assertNotIn("reboot", m.execute(f"cat {self.config}"))
                 else:
                     # newer dnf supports that natively
                     self.assertNotIn("ExecStartPost", out)
-                    self.assertIn("reboot = when-needed", m.execute("cat /etc/dnf/automatic.conf"))
+                    self.assertIn("reboot = when-needed", m.execute(f"cat {self.config}"))
             else:
                 self.assertNotIn("ExecStartPost", out)
 
         def assertTimer(hour, dow=None):
-            if self.backend == "dnf":
+            if "dnf" in self.backend:
                 assertTimerDnf(hour, dow)
             else:
                 raise NotImplementedError(self.backend)
 
-        def assertTypeDnf(_type):
-            if _type == "all":
+        def assertTypeDnf(type_):
+            if type_ == "all":
                 match = '= default'
-            elif _type == "security":
+            elif type_ == "security":
                 match = '= security'
             else:
-                raise ValueError(_type)
+                raise ValueError(type_)
 
-            self.assertIn(match, m.execute("grep upgrade_type /etc/dnf/automatic.conf"))
+            self.assertIn(match, m.execute(f"grep upgrade_type {self.config}"))
 
-        def assertType(_type):
-            if self.backend == "dnf":
-                assertTypeDnf(_type)
+        def assertType(type_):
+            if "dnf" in self.backend:
+                assertTypeDnf(type_)
             else:
                 raise NotImplementedError(self.backend)
 
@@ -1544,15 +1515,15 @@ class TestAutoUpdates(NoSubManCase):
         b.wait_in_text("#autoupdates-settings", "Disabled")
         assertTimer(None)
 
-        if self.backend == "dnf":
+        if "dnf" in self.backend:
             b.click("#autoupdates-settings button:contains('Edit')")
             b.wait_visible("#automatic-updates-dialog")
             b.click("#all-updates")
             self.closeSettings(b)
             # OnCalendar= parsing: only time
-            m.execute("mkdir -p /etc/systemd/system/dnf-automatic.timer.d")
+            m.execute(f"mkdir -p /etc/systemd/system/{self.timer_unit}.timer.d")
             m.execute(r'printf "[Timer]\nOnUnitInactiveSec=\nOnCalendar=08:00\n" > '
-                      r'/etc/systemd/system/dnf-automatic-install.timer.d/time.conf; systemctl daemon-reload')
+                      f'/etc/systemd/system/{self.timer_unit}.timer.d/time.conf; systemctl daemon-reload')
             b.reload()
             b.enter_page("/updates")
             b.wait_in_text("#autoupdates-settings", "Updates will be applied every day at 8:00")
@@ -1560,7 +1531,7 @@ class TestAutoUpdates(NoSubManCase):
 
             # OnCalendar= parsing: weekday and time
             m.execute(r'printf "[Timer]\nOnUnitInactiveSec=\nOnCalendar=Tue 20:00\n" > '
-                      r'/etc/systemd/system/dnf-automatic-install.timer.d/time.conf; systemctl daemon-reload')
+                      f'/etc/systemd/system/{self.timer_unit}.timer.d/time.conf; systemctl daemon-reload')
             b.reload()
             b.enter_page("/updates")
             b.wait_in_text("#autoupdates-settings", "Updates will be applied every Tuesday at 20:00")
@@ -1568,7 +1539,7 @@ class TestAutoUpdates(NoSubManCase):
 
             # OnCalendar= parsing: "every day" calendar and time
             m.execute(r'printf "[Timer]\nOnUnitInactiveSec=\nOnCalendar=*-*-* 07:00\n" > '
-                      r'/etc/systemd/system/dnf-automatic-install.timer.d/time.conf; systemctl daemon-reload')
+                      f'/etc/systemd/system/{self.timer_unit}.timer.d/time.conf; systemctl daemon-reload')
             b.reload()
             b.enter_page("/updates")
             b.wait_in_text("#autoupdates-settings", "Updates will be applied every day at 7:00")
@@ -1576,7 +1547,7 @@ class TestAutoUpdates(NoSubManCase):
 
             # OnCalendar= parsing: unsupported
             m.execute(r'printf "[Timer]\nOnUnitInactiveSec=\nOnCalendar=*-02-* 11:00\n" > '
-                      r'/etc/systemd/system/dnf-automatic-install.timer.d/time.conf; systemctl daemon-reload')
+                      f'/etc/systemd/system/{self.timer_unit}.timer.d/time.conf; systemctl daemon-reload')
             b.reload()
             b.enter_page("/updates")
             time.sleep(5)
@@ -1584,6 +1555,7 @@ class TestAutoUpdates(NoSubManCase):
             # don't allow stomping over unparsable custom settings
             b.wait_not_present("#autoupdates-settings button")
 
+    @testlib.skipImage("TODO: support DNF5 automatic updates", "fedora-41")
     def testWithAvailableUpdates(self):
         b = self.browser
         m = self.machine
@@ -1593,8 +1565,7 @@ class TestAutoUpdates(NoSubManCase):
         self.createPackage("kernel-rt", "1.0", "2")
         self.enableRepo()
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#available-updates")
 
@@ -1610,38 +1581,37 @@ class TestAutoUpdates(NoSubManCase):
         self.closeSettings(b)
         b.wait_in_text("#autoupdates-settings", "Updates will be applied every day at 06:00")
 
-        if self.backend == 'dnf':
+        if "dnf" in self.backend:
             # dial down the random sleep to avoid the test having to wait 5 mins
-            self.sed_file("/random_sleep/ s/=.*$/= 3/", "/etc/dnf/automatic.conf")
+            self.sed_file("/random_sleep/ s/=.*$/= 3/", self.config)
             # then manually start the upgrade job like the timer would
-            m.execute("systemctl start dnf-automatic-install.service")
+            m.execute(f"systemctl start {self.timer_unit}.service")
             try:
                 # new kernel-rt package got installed
                 m.execute("test -f /stamp-kernel-rt-1.0-2")
                 # triggered reboot
                 m.execute("until test -f /run/nologin; do sleep 1; done")
                 # old distros don't have that yet; rely on /run/nologin to indicate scheduled shutdown
-                if not m.image.startswith("rhel-8") and not m.image.startswith("centos-8"):
+                if not m.image.startswith("rhel-8"):
                     self.assertIn("scheduled for", m.execute("shutdown --show 2>&1"))
             finally:
                 # always cancel the scheduled reboot
                 m.execute("shutdown -c; test ! -f /run/nologin")
             # service should show kernel-rt upgrade
             out = m.execute(
-                "if systemctl status --lines=50 dnf-automatic-install.service; then echo 'expected service to be stopped'; exit 1; fi")
+                f"if systemctl status --lines=50 {self.timer_unit}.service; then echo 'expected service to be stopped'; exit 1; fi")
             self.assertIn("kernel-rt", out)
 
             # run it again, now there are no available updates → no reboot
-            m.execute("systemctl start dnf-automatic-install.service")
+            m.execute(f"systemctl start {self.timer_unit}.service")
             m.execute("test -f /stamp-kernel-rt-1.0-2; test ! -f /run/nologin")
             # service should not do much
             out = m.execute(
-                "if systemctl status dnf-automatic-install.service; then echo 'expected service to be stopped'; exit 1; fi")
+                f"if systemctl status {self.timer_unit}.service; then echo 'expected service to be stopped'; exit 1; fi")
             self.assertNotIn("kernel-rt", out)
         else:
             raise NotImplementedError(self.backend)
 
-    @testlib.skipDistroPackage()
     def testPrivilegeChange(self):
         b = self.browser
         m = self.machine
@@ -1672,21 +1642,25 @@ class TestAutoUpdates(NoSubManCase):
         b.wait_visible("#autoupdates-settings button:disabled")
 
 
-@testlib.skipImage("Image uses OSTree", "fedora-coreos", "rhel4edge")
+@testlib.skipImage("Image uses OSTree", "fedora-coreos")
 class TestAutoUpdatesInstall(NoSubManCase):
     def testUnsupported(self):
         b = self.browser
         m = self.machine
 
-        m.execute("if type dnf; then dnf remove -y dnf-automatic; elif type apt; then dpkg -P unattended-upgrades; fi")
+        if self.backend == 'dnf5':
+            m.execute("dnf remove -y dnf5-plugin-automatic")
+        elif self.backend == 'dnf4':
+            m.execute("dnf remove -y dnf-automatic")
+        elif self.backend == 'apt':
+            m.execute("dpkg -P unattended-upgrades")
 
         # first test with available upgrades
         self.createPackage("vanilla", "1.0", "1", install=True)
         self.createPackage("vanilla", "1.0", "2")
         self.enableRepo()
 
-        m.start_cockpit()
-        b.login_and_go("/updates")
+        self.login_and_go("/updates")
         with b.wait_timeout(30):
             b.wait_visible("#available-updates")
 
@@ -1697,7 +1671,7 @@ class TestAutoUpdatesInstall(NoSubManCase):
             b.wait_visible(".pf-v5-c-empty-state__title:contains('Update was successful')")
         b.click("#ignore")
 
-        if self.backend == 'dnf':
+        if "dnf" in self.backend:
             b.wait_in_text("#autoupdates-settings", "Not set up")
             b.wait_not_present("#settings .pf-v5-c-alert")
             b.click("#autoupdates-settings button:contains('Enable')")
@@ -1709,8 +1683,6 @@ class TestAutoUpdatesInstall(NoSubManCase):
     def testInstall(self):
         b = self.browser
         m = self.machine
-
-        m.execute('dnf remove -y dnf-automatic')
 
         # provide minimal content in order for the backend to be seen as supported
         timerContent = """
@@ -1727,15 +1699,28 @@ Unit=-.mount
 [Install]
 WantedBy=basic.target
         """
-        self.createPackage('dnf-automatic', '1', '1', content={
-            '/etc/dnf/automatic.conf': '',
-            '/usr/lib/systemd/system/dnf-automatic.timer': timerContent,
-            '/usr/lib/systemd/system/dnf-automatic-install.timer': timerContent
-        })
+
+        if self.backend == 'dnf5':
+            m.execute("dnf remove -y dnf5-plugin-automatic")
+            self.createPackage('dnf5-plugin-automatic', '1', '1', content={
+                '/etc/dnf/dnf5-plugins/automatic.conf': '',
+                '/usr/lib/systemd/system/dnf5-automatic.timer': timerContent,
+            })
+
+        elif self.backend == 'dnf4':
+            m.execute("dnf remove -y dnf-automatic")
+
+            self.createPackage('dnf-automatic', '1', '1', content={
+                '/etc/dnf/automatic.conf': '',
+                '/usr/lib/systemd/system/dnf-automatic.timer': timerContent,
+                '/usr/lib/systemd/system/dnf-automatic-install.timer': timerContent,
+            })
+        elif self.backend == 'apt':
+            m.execute("dpkg -P unattended-upgrades")
+
         self.enableRepo()
 
-        m.start_cockpit()
-        b.login_and_go('/updates')
+        self.login_and_go('/updates')
 
         # click through install dialog
         with b.wait_timeout(30):

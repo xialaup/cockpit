@@ -1,6 +1,17 @@
 #!/usr/bin/make -f
 
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
+# we need an apparmor profile for >= 4.0; this exists in Ubuntu >= 24.04, but not in Debian yet
+PRE4AA = $(filter $(shell . /etc/os-release; echo $${VERSION_ID:-unstable}),22.04 11 12 unstable)
+
+# keep the host switcher on in currently supported stable releases
+STABLE = $(filter $(shell . /etc/os-release; echo $${VERSION_CODENAME}),bookworm jammy noble)
+ifneq ($(STABLE),)
+    CONFIG_OPTIONS := $(CONFIG_OPTIONS) --enable-multihost
+endif
 
 # riscv is an emulated architecture for now, and too slow to run expensive unit tests
 # hppa's threading is absurdly slow (#981127)
@@ -18,8 +29,6 @@ export deb_pamlibdir = $(shell { pkgconf --variable=libdir pam || echo /lib/$(DE
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		--with-cockpit-user=cockpit-ws \
-		--with-cockpit-ws-instance-user=cockpit-wsinstance \
 		--with-pamdir=/$(deb_pamlibdir)/security \
 		--libexecdir=/usr/lib/cockpit $(CONFIG_OPTIONS)
 
@@ -28,7 +37,7 @@ override_dh_auto_configure:
 override_dh_auto_install:
 	DEB_PYTHON_INSTALL_LAYOUT=deb dh_auto_install
 
-# avoid trying to start cockpit-motd.service and cockpit-wsinstance-*.socket etc.
+# avoid trying to start cockpit-issue.service and cockpit-wsinstance-*.socket etc.
 override_dh_installsystemd:
 	dh_installsystemd -p cockpit-ws cockpit.socket
 
@@ -44,17 +53,24 @@ override_dh_install:
 	# handled by package maintainer scripts
 	rm debian/tmp/etc/motd.d/cockpit debian/tmp/etc/issue.d/cockpit.issue
 
+	# already processed into debian/copyright
+	rm -r debian/tmp/usr/share/doc/cockpit/legal
+
 	# unpackaged modules
 	rm -r debian/tmp/usr/share/cockpit/kdump
-	rm debian/tmp/usr/share/metainfo/org.cockpit-project.cockpit-kdump.metainfo.xml
+	rm debian/tmp/usr/share/metainfo/org.cockpit_project.cockpit_kdump.metainfo.xml
 	rm -r debian/tmp/usr/share/cockpit/selinux
-	rm debian/tmp/usr/share/metainfo/org.cockpit-project.cockpit-selinux.metainfo.xml
+	rm debian/tmp/usr/share/metainfo/org.cockpit_project.cockpit_selinux.metainfo.xml
 
 	dh_install -Xusr/src/debug
 	# we don't need this, it contains full build paths and breaks reproducibility
 	rm -r debian/tmp/usr/lib/python*/*-packages/*.dist-info
 
-	make install-tests DESTDIR=debian/cockpit-tests
+        # AppArmor profile
+ifeq ($(PRE4AA),)
+	mkdir -p debian/cockpit-ws/etc/apparmor.d/
+	install -p -m 644 tools/apparmor.d/cockpit-desktop debian/cockpit-ws/etc/apparmor.d/
+endif
 
 execute_after_dh_install-indep:
 	# avoid dh_missing failure
@@ -64,8 +80,8 @@ execute_after_dh_install-indep:
 execute_after_dh_install-arch:
 ifeq (, $(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 ifeq ($(shell . /etc/os-release; echo $${VERSION_ID:-unstable}),22.04)
-	PYTHONPATH=$$(ls -d debian/cockpit-bridge/usr/lib/python3*/dist-packages) python3 -m pytest -vv -k 'not linter and not test_descriptions'
+	NO_QUNIT=1 PYTHONPATH=$$(ls -d debian/cockpit-bridge/usr/lib/python3*/dist-packages) python3 -m pytest -vv -k 'not linter and not test_descriptions'
 else
-	pytest -vv -k 'not linter and not test_descriptions' -opythonpath=$$(ls -d debian/cockpit-bridge/usr/lib/python3*/dist-packages)
+	NO_QUNIT=1 pytest -vv -k 'not linter and not test_descriptions' -opythonpath=$$(ls -d debian/cockpit-bridge/usr/lib/python3*/dist-packages)
 endif
 endif

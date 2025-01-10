@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import React, { useState, useContext, useEffect } from 'react';
@@ -108,7 +108,7 @@ export const IpSettingsDialog = ({ topic, connection, dev, settings }) => {
             setRoutes([]);
     }, [method, addresses.length, canHaveExtra, isOff]);
 
-    const onSubmit = (ev) => {
+    const onSubmit = (_ev) => {
         const createSettingsObj = () => ({
             ...settings,
             [topic]: {
@@ -131,12 +131,6 @@ export const IpSettingsDialog = ({ topic, connection, dev, settings }) => {
             setDialogError,
             onClose: Dialogs.close,
         });
-
-        // Prevent dialog from closing because of <form> onsubmit event
-        if (event)
-            event.preventDefault();
-
-        return false;
     };
     const addressIpv4Helper = (address) => {
         const config = { address, netmask: '', gateway: '' };

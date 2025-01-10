@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -58,7 +58,7 @@ function parse_url(url) {
 }
 
 function tang_adv_payload(adv) {
-    return JSON.parse(cockpit.utf8_decoder().decode(cockpit.base64_decode(adv.payload)));
+    return JSON.parse(window.atob(adv.payload));
 }
 
 function jwk_b64_encode(bytes) {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import child_process from 'child_process';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import process from 'process';
+import child_process from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
 
 import { getFiles, getTestFiles, all_subdirs } from './files.js';
 
@@ -32,11 +32,12 @@ const pkgOptions = {
     nodePaths,
     outbase: './pkg',
     outdir: "./dist",
-    target: ['es2020'],
+    target: ['es2021'],
 };
 
 // context options for qunit tests in qunit/
 const qunitOptions = {
+    sourcemap: "linked",
     bundle: true,
     minify: false,
     nodePaths,
@@ -50,8 +51,12 @@ const qunitOptions = {
 const parser = (await import('argparse')).default.ArgumentParser();
 parser.add_argument('-r', '--rsync', { help: "rsync bundles to ssh target after build", metavar: "HOST" });
 parser.add_argument('-w', '--watch', { action: 'store_true', help: "Enable watch mode" });
+parser.add_argument('-m', '--metafile', { help: "Enable bund size information file", metavar: "FILE" });
 parser.add_argument('onlydir', { nargs: '?', help: "The pkg/<DIRECTORY> to build (eg. base1, shell, ...)", metavar: "DIRECTORY" });
 const args = parser.parse_args();
+
+if (args.metafile)
+    pkgOptions.metafile = true;
 
 if (args.onlydir?.includes('/'))
     parser.error("Directory must not contain '/'");
@@ -115,7 +120,7 @@ async function build() {
 
     const { entryPoints, assetFiles, redhat_fonts } = getFiles(args.onlydir);
     const tests = getTestFiles();
-    const testEntryPoints = tests.map(test => "pkg/" + test + ".js");
+    const testEntryPoints = tests.map(test => "pkg/" + test);
 
     const pkgFirstPlugins = [
         cleanPlugin({ subdir: args.onlydir }),
@@ -201,7 +206,9 @@ async function build() {
         });
 
         try {
-            await Promise.all([pkgContext.rebuild(), qunitContext.rebuild()]);
+            const results = await Promise.all([pkgContext.rebuild(), qunitContext.rebuild()]);
+            if (args.metafile)
+                fs.writeFileSync(args.metafile, JSON.stringify(results[0].metafile));
         } catch (e) {
             if (!args.watch)
                 process.exit(1);

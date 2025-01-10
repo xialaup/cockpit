@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -65,47 +65,4 @@ cockpit_locale_from_language (const gchar *value,
   g_free (country);
   g_free (lang);
   return result;
-}
-
-/* The most recently set language */
-static gchar previous[32] = { '\0' };
-
-void
-cockpit_locale_set_language (const gchar *value)
-{
-  const gchar *encoding = NULL;
-  gchar *locale = NULL;
-
-  if (value == NULL)
-    value = "C";
-  else
-    encoding = "UTF-8";
-
-  if (strlen (value) > sizeof (previous) - 1)
-    {
-      g_printerr ("invalid language: %s\n", value);
-      return;
-    }
-
-  /* Already set our locale to this language? */
-  if (g_strcmp0 (value, previous) == 0)
-      return;
-
-  locale = cockpit_locale_from_language (value, encoding, NULL);
-  g_assert (locale != NULL);
-
-  if (setlocale (LC_ALL, locale) == NULL)
-    {
-      /* Note we use g_printerr directly, since we want no gettext invocations on this line */
-      g_printerr ("invalid or unusable locale: %s\n", locale);
-    }
-  else
-    {
-      g_debug ("set bridge locale to: %s", locale);
-      cockpit_setenv_check ("LANG", locale, TRUE);
-    }
-
-  strncpy (previous, value, sizeof (previous) - 1);
-  previous[sizeof (previous) - 1] = '\0';
-  g_free (locale);
 }

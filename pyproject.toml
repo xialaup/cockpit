@@ -4,12 +4,74 @@ backend-path = ['src']
 build-backend = 'build_backend'
 
 [tool.mypy]
-mypy_path = 'src:test/common'
-exclude = '_vendor'
+follow_imports = 'silent'  # https://github.com/python-lsp/pylsp-mypy/issues/81
+scripts_are_modules = true  # allow checking all scripts in one invocation
+explicit_package_bases = true
+mypy_path = 'src:test/common:bots'
+exclude = [
+    'tmp/',
+    'tools/vulture-suppressions/',
+    'vendor/',
+]
+
 [[tool.mypy.overrides]]
-module = ["cockpit._vendor.*", "dbus", "gi.*", "task", "vdo.*"]
-follow_imports = 'silent'
 ignore_missing_imports = true
+module = [
+    # run without submodules checked out
+    "cockpit._vendor.*",
+
+    # run without bots checked out
+    "lib.*",
+    "machine.*",
+    "task.*",
+    "testvm",
+
+    # run with bots checked out but its dependencies missing
+    "libvirt",
+    "libvirt_qemu",
+    "pika",
+
+    # run without pcp module types
+    "pcp",
+    "cpmapi",
+
+    # run without gobject-introspection (used from cockpit-client for Gtk)
+    "gi.*",
+
+    # these are used from various scripts meant to run on the host
+    "dbus",
+    "tracer.query",
+    "vdo.*",
+]
+
+[[tool.mypy.overrides]]
+# https://github.com/python/mypy/issues/11401 prevents us from enabling strict
+# mode for a given set of files, so instead, we enable the corresponding set of
+# individual checks the files which are strictly typed.
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+no_implicit_reexport = true
+strict_concatenate = true
+strict_equality = true
+warn_unused_ignores = true
+module = [
+    # src
+    'cockpit',
+    'cockpit._version',
+    'cockpit.jsonutil',
+    'cockpit.protocol',
+    'cockpit.transports',
+
+    # test/common
+    'testlib',
+    'js_coverage',
+    'webdriver_bidi',
+]
 
 [tool.pylint]
 max-line-length = 118
@@ -32,6 +94,7 @@ exclude = [
     "node_modules/",
 ]
 line-length = 118
+preview = true
 src = []
 
 [tool.ruff.lint]
@@ -80,25 +143,32 @@ known-first-party = ["cockpit"]
 
 [tool.pytest.ini_options]
 addopts = ['--strict-markers']  # cf. https://github.com/cockpit-project/cockpit/pull/18584#issuecomment-1490243994
-pythonpath = ["src"]
+pythonpath = ["src", "test/common", "bots"]
 testpaths = ["test/pytest"]
 log_cli = true
 required_plugins = ["pytest-asyncio"]
+
+[tool.pyright]
+strict = ["**"]
+extraPaths = ["src", "test/common", "bots"]
 
 [tool.vulture]
 paths = [
    "src",
    "test/pytest",
-   "tools/vulture-suppressions",
+   "tools/vulture_suppressions",
 ]
 ignore_names = [
    "do_*",
+   "pytest_*",
    "test[A-Z0-9]*",
+   "pytestmark",
 ]
 ignore_decorators = [
    "@*.getter",
    "@*.register_function",
    "@bus.Interface.Method",
+   "@pytest.fixture",
    "@pytest.hookimpl",
 ]
 
@@ -135,13 +205,14 @@ wheel_build_env = pkg
 # All other environments (names like py311-lint, py36-pytest, etc) are isolated
 # from the system and get their packages from PyPI, according to the specific
 # test environment being requested.  We build the wheel in a common environment.
+# These tests will not run the PCP tests as there is no wheel available.
+# https://github.com/performancecopilot/pcp/issues/2076
 [testenv]
 package = wheel
 wheel_build_env = venv-pkg
 skip_install = lint: True
 deps =
   lint: mypy
-  lint: flake8
   lint: ruff
   lint: vulture
   pytest
@@ -149,8 +220,10 @@ deps =
   pytest: pytest-cov
   pytest: pytest-timeout
   pytest: pytest-xdist
-allowlist_externals = test/static-code
+allowlist_externals = test/common/static-code
+setenv =
+  NO_QUNIT=1
 commands =
   pytest: python3 -m pytest -opythonpath= {posargs}
-  lint: test/static-code --tap
+  lint: test/common/static-code --tap
 """

@@ -44,6 +44,7 @@
         "react/jsx-closing-tag-location": "off",
         "react/jsx-curly-newline": "off",
         "react/jsx-first-prop-new-line": "off",
+        "react/jsx-no-useless-fragment": "error",
         "react/prop-types": "off",
         "space-before-function-paren": "off",
         "standard/no-callback-literal": "off",
@@ -53,9 +54,46 @@
         "react/jsx-wrap-multilines": "off"
     },
     "globals": {
-        "require": false,
-        "module": false
+        "require": "readonly",
+        "module": "readonly"
     },
+    "overrides": [
+        {
+          "files": ["**/*.ts", "**/*.tsx"],
+          "plugins": [
+            "@typescript-eslint"
+          ],
+          "extends": "plugin:@typescript-eslint/recommended",
+          "parser": "@typescript-eslint/parser",
+          "parserOptions": {
+            "projectService": ["./tsconfig.json"]
+          },
+          "rules": {
+            // https://typescript-eslint.io/rules/no-use-before-define
+            // Note: you must disable the base rule as it can report incorrect errors
+            "no-use-before-define": "off",
+            "@typescript-eslint/no-use-before-define": [
+              "error",
+              {
+                "functions": false
+              }
+            ],
+            // as recommended by https://typescript-eslint.io/rules/no-unused-vars/
+            "@typescript-eslint/no-unused-vars": [
+              "error",
+              {
+                "args": "all",
+                "argsIgnorePattern": "^_",
+                "caughtErrors": "all",
+                "caughtErrorsIgnorePattern": "^_",
+                "destructuredArrayIgnorePattern": "^_",
+                "varsIgnorePattern": "^_",
+                "ignoreRestSiblings": true
+              }
+            ]
+          }
+        }
+    ],
     "settings": {
         "react": {
             "version": "detect"

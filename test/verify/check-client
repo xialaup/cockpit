@@ -15,14 +15,13 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import testlib
 
 
-@testlib.skipImage("needs pybridge", "rhel-8*", "centos-8*")
 # enable this once our cockpit/ws container can beiboot
-@testlib.skipOstree("client setup does not work with ws container")
+@testlib.skipWsContainer("client setup does not work with ws container")
 class TestClient(testlib.MachineCase):
 
     provision = {
@@ -37,9 +36,14 @@ class TestClient(testlib.MachineCase):
         self.m_target.execute("hostnamectl set-hostname target")
         # validate on-demand install: this does not work on arch, non-split package
         if self.m_target.image.startswith("debian") or self.m_target.image.startswith("ubuntu"):
-            self.m_target.execute("dpkg --purge cockpit-pcp-dbgsym || true; dpkg --purge cockpit-pcp pcp")
-        elif self.m_target.image != 'arch':
-            self.m_target.execute("rpm --erase --verbose cockpit-pcp pcp")
+            self.m_target.execute("dpkg --purge pcp")
+        elif self.m_target.image == 'arch':
+            self.m_target.execute("pacman -Rdd --noconfirm pcp")
+        else:
+            self.m_target.execute("""
+                rpm --erase --verbose pcp python3-pcp
+                systemctl daemon-reload
+            """)
 
         # replicate the plumbing bits of src/client/cockpit-client to set up cockpit-beiboot
         self.m_client.write("/etc/cockpit/cockpit.conf", """
@@ -50,11 +54,22 @@ LoginTo = true
 [Ssh-Login]
 Command = /usr/bin/env python3 -m cockpit.beiboot
 """)
+        # use the connect_from_flatpak() code path of beiboot.py
+        self.m_client.write("/.flatpak-info", "test mock")
+        self.m_client.write("/usr/local/bin/flatpak-spawn", """#!/bin/sh -eux
+if [ "$1" = "--host" ]; then shift; continue; fi
+while [ "${1#--env=}" != "$1" ]; do
+    export "${1#--env=}"
+    shift
+    continue
+done
+exec "$@"
+""", perm="0755")
 
     def check_login(self, expected_user):
         b = self.browser
         b.wait_visible('#content')
-        b.wait_in_text("#host-toggle", expected_user)
+        b.wait_in_text("#hosts-sel", expected_user)
         b.enter_page("/system")
         if self.is_devel_build():
             b.wait_visible("#system_information_hostname_text")
@@ -82,13 +97,14 @@ Command = /usr/bin/env python3 -m cockpit.beiboot
     def testBeibootNoBridge(self):
         # set up target machine: no cockpit
         self.m_target.execute("rm /usr/bin/cockpit-bridge; rm -r /usr/share/cockpit")
-        self.checkLoginScenarios(local_bridge=False)
+        self.checkLoginScenarios()
 
     def testBeibootWithBridge(self):
-        self.checkLoginScenarios(local_bridge=True)
+        self.checkLoginScenarios()
 
-    def checkLoginScenarios(self, *, local_bridge=True):
+    def checkLoginScenarios(self):
         self.m_client.spawn(f"runuser -u admin -- {self.libexecdir}/cockpit-ws --no-tls", "ws.log")
+        self.m_client.wait_for_cockpit_running()
 
         b = self.browser
         b.open("/")
@@ -98,8 +114,9 @@ Command = /usr/bin/env python3 -m cockpit.beiboot
         b.wait_not_visible("#recent-hosts-list")
         b.set_val("#server-field", "10.111.113.2")
         b.click("#login-button")
-        b.wait_in_text("#conversation-group", "authenticity of host '10.111.113.2")
-        b.set_val("#conversation-input", "yes")
+        # accept unknown host key
+        b.wait_in_text("#hostkey-message-1", "10.111.113.2")
+        b.wait_in_text("#hostkey-fingerprint", "SHA256:")
         b.click("#login-button")
         b.wait_text("#conversation-prompt", "admin@10.111.113.2's password: ")
         b.set_val("#conversation-input", "foobar")
@@ -122,21 +139,15 @@ Command = /usr/bin/env python3 -m cockpit.beiboot
         self.check_login("admin@target")
         b.become_superuser()
 
-        # cockpit-pcp is installed on client, but not on target; recognize that
-        if self.m_target.image != 'arch':
-            b.go("/metrics")
-            b.enter_page("/metrics")
-            b.wait_in_text(".pf-v5-c-empty-state", "cockpit-pcp is missing")
-            if local_bridge:
-                # on-demand install is allowed
-                b.wait_in_text(".pf-v5-c-empty-state button.pf-m-primary", "Install cockpit-pcp")
-                b.click(".pf-v5-c-empty-state button.pf-m-primary")
-                b.wait_in_text(".pf-v5-c-modal-box", "cockpit-pcp will be installed")
-                b.click(".pf-v5-c-modal-box button.cancel")
-            else:
-                # not currently supported in beiboot scenario
-                b.wait_in_text(".pf-v5-c-empty-state", "Installation not supported without installed cockpit package")
-                b.wait_not_present(".pf-v5-c-empty-state button")
+        # python3-pcp is installed on client, but not on target; recognize that
+        b.go("/metrics")
+        b.enter_page("/metrics")
+        b.wait_in_text(".pf-v5-c-empty-state", "PCP is missing")
+        # on-demand install is allowed
+        b.wait_in_text(".pf-v5-c-empty-state button.pf-m-primary", "Install PCP support")
+        b.click(".pf-v5-c-empty-state button.pf-m-primary")
+        b.wait_in_text(".pf-v5-c-modal-box", "pcp will be installed")
+        b.click(".pf-v5-c-modal-box button.cancel")
 
         b.drop_superuser()
         self.logout()
@@ -147,13 +158,11 @@ Command = /usr/bin/env python3 -m cockpit.beiboot
             b.wait_text("#conversation-prompt", "admin@10.111.113.2's password: ")
             b.set_val("#conversation-input", "wrong")
             b.click("#login-button")
-        b.wait_in_text("#login-fatal-message", "admin@10.111.113.2: Permission denied")
-        b.click("#login-again")
-        b.wait_text("#brand", "Connect to:")
-        # resets the host field
-        b.wait_val("#server-field", "")
+        b.wait_in_text("#login-error-title", "Authentication failed")
+        b.wait_val("#server-field", "10.111.113.2")
 
         # connect to most recent host
+        b.open("/")  # reset URL from /metrics and last remote =host
         b.click("#recent-hosts-list .host-line button.host-name")
         b.wait_text("#conversation-prompt", "admin@10.111.113.2's password: ")
         b.set_val("#conversation-input", "foobar")
@@ -208,9 +217,9 @@ Command = /usr/bin/env python3 -m cockpit.beiboot
         # unreachable host
         b.set_val("#server-field", "unknownhost")
         b.click("#login-button")
-        b.wait_in_text("#login-fatal-message", "Could not resolve hostname unknownhost")
-        b.click("#login-again")
-        b.wait_text("#brand", "Connect to:")
+        b.wait_text("#login-error-title", "Refusing to connect")
+        b.wait_text("#login-error-message", "Host is unknown")
+        b.wait_val("#server-field", "unknownhost")
         # does not appear in recent hosts
         b.wait_in_text("#recent-hosts-list", "10.111.113.2")
         self.assertNotIn("unknownhost", b.text("#recent-hosts-list"))
@@ -218,7 +227,7 @@ Command = /usr/bin/env python3 -m cockpit.beiboot
         # wrong port
         b.set_val("#server-field", "10.111.113.2:222")
         b.click("#login-button")
-        b.wait_in_text("#login-fatal-message", "connect to host 10.111.113.2 port 222: No route to host")
+        b.wait_in_text("#login-error-message", "Host is unknown")
 
         # unencrypted SSH key login
         self.m_client.execute("runuser -u admin -- ssh-keygen -t rsa -N '' -f ~admin/.ssh/id_rsa")

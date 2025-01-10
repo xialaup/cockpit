@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 import cockpit from 'cockpit';
 import React, { useState } from 'react';
@@ -27,11 +27,11 @@ import { Popover } from "@patternfly/react-core/dist/esm/components/Popover/inde
 import { Progress, ProgressMeasureLocation, ProgressSize } from "@patternfly/react-core/dist/esm/components/Progress/index.js";
 import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/index.js";
 import { EyeIcon, EyeSlashIcon, HelpIcon } from '@patternfly/react-icons';
+import { Flex, FlexItem } from "@patternfly/react-core/dist/esm/layouts/Flex/index.js";
 
 import { FormHelper } from "cockpit-components-form-helper";
 
 import './cockpit-components-password.scss';
-import { Flex, FlexItem } from '@patternfly/react-core';
 
 const _ = cockpit.gettext;
 
@@ -123,7 +123,6 @@ export const PasswordFormFields = ({
                                </button>
                            </Popover>
                        }
-                       validated={error_password ? "warning" : "default"}
                        id={idPrefix + "-pw1-group"}
                        fieldId={idPrefix + "-pw1"}>
                 <InputGroup>

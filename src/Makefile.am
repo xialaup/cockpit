@@ -20,7 +20,6 @@ pytest-cov: $(BUILT_SOURCES) $(DIST_STAMP) $(MANIFESTS)
 	$(MAKE) test-server
 	cd '$(srcdir)' && abs_builddir='$(abs_builddir)' pytest --cov
 
-if !WITH_OLD_BRIDGE
 INSTALL_DATA_LOCAL_TARGETS += install-python
 install-python:
 	@# wheel-based installation with .dist-info.
@@ -40,7 +39,6 @@ uninstall-python:
 	@# HACK: pip uninstall does not know about --root and --prefix
 	rm -r $(DESTDIR)$(prefix)/lib/python*/*-packages/cockpit \
 	      $(DESTDIR)$(prefix)/lib/python*/*-packages/cockpit-*.dist-info
-endif
 
 
 # -----------------------------------------------------------------------------
@@ -78,11 +76,11 @@ AM_CFLAGS = \
 
 metainfodir = ${datarootdir}/metainfo
 nodist_metainfo_DATA = \
-	src/appstream/org.cockpit-project.cockpit-sosreport.metainfo.xml \
-	src/appstream/org.cockpit-project.cockpit-kdump.metainfo.xml \
-	src/appstream/org.cockpit-project.cockpit-selinux.metainfo.xml \
-	src/appstream/org.cockpit-project.cockpit-storaged.metainfo.xml \
-	src/appstream/org.cockpit-project.cockpit-networkmanager.metainfo.xml \
+	src/appstream/org.cockpit_project.cockpit_sosreport.metainfo.xml \
+	src/appstream/org.cockpit_project.cockpit_kdump.metainfo.xml \
+	src/appstream/org.cockpit_project.cockpit_selinux.metainfo.xml \
+	src/appstream/org.cockpit_project.cockpit_storaged.metainfo.xml \
+	src/appstream/org.cockpit_project.cockpit_networkmanager.metainfo.xml \
 	$(NULL)
 
 metainfo_in = $(patsubst %,%.in,$(nodist_metainfo_DATA))

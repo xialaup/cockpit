@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_AUTH_H__
@@ -102,7 +102,10 @@ gboolean        cockpit_auth_local_finish    (CockpitAuth *self,
 CockpitWebService *  cockpit_auth_check_cookie    (CockpitAuth *self,
                                                    CockpitWebRequest *request);
 
-gchar *         cockpit_auth_parse_application    (const gchar *path,
+gboolean        cockpit_auth_is_valid_cookie_value (CockpitAuth *self,
+                                                    const gchar *cookie_value);
+
+  gchar *         cockpit_auth_parse_application    (const gchar *path,
                                                    gboolean *is_host);
 
 gchar *         cockpit_auth_empty_cookie_value       (const gchar *path,

@@ -1,5 +1,5 @@
 import cockpit from "cockpit";
-import QUnit from "qunit-tests";
+import QUnit, { mock_info } from "qunit-tests";
 
 const EXPECT_MOCK_STREAM = "0 1 2 3 4 5 6 7 8 9 ";
 
@@ -65,6 +65,9 @@ QUnit.test("simple request", assert => {
                         plot: {
                             label: "Plots"
                         },
+                        remote: {
+                            label: "Remote channel"
+                        },
                         service: {
                             label: "Generic Service Monitor"
                         },
@@ -129,6 +132,47 @@ QUnit.test("streaming", assert => {
                 assert.equal(got, EXPECT_MOCK_STREAM, "stream got right data");
                 done();
             });
+});
+
+QUnit.test("split UTF8 frames", assert => {
+    const done = assert.async();
+    assert.expect(1);
+
+    cockpit.http(test_server)
+            .get("/mock/split-utf8")
+            .then(resp => assert.equal(resp, "initialfirst half é second halffinal", "correct response"))
+            .finally(done);
+});
+
+QUnit.test("truncated UTF8 frame", assert => {
+    const done = assert.async();
+    assert.expect(3);
+    let received = "";
+
+    cockpit.http(test_server)
+            .get("/mock/truncated-utf8")
+            .stream(block => { received += block })
+            .then(() => assert.ok(false, "should not have succeeded"))
+            // does not include the first byte of é
+            .catch(ex => {
+                // does not include the first byte of é
+                assert.equal(received, "initialfirst half ", "received expected data");
+                assert.equal(ex.problem, "protocol-error", "error code");
+                assert.ok(ex.message.includes("unexpected end of data"), ex.message);
+            })
+            .finally(done);
+});
+
+QUnit.test("binary data", async assert => {
+    const data = await cockpit.http({ ...test_server, binary: true }).get("/mock/binary-data");
+    assert.deepEqual(data, new Uint8Array([255, 1, 255, 2]));
+});
+
+QUnit.test("invalid UTF-8", assert => {
+    assert.rejects(
+        cockpit.http(test_server).get("/mock/binary-data"),
+        ex => ex.problem == "protocol-error" && ex.message.includes("can't decode byte 0xff"),
+        "rejects non-UTF-8 data on text channel");
 });
 
 QUnit.test("close", assert => {
@@ -257,7 +301,7 @@ QUnit.test("http keep alive", async assert => {
     assert.expect(1);
 
     // connection sharing is not implemented in the pybridge
-    if (await QUnit.mock_info("pybridge")) {
+    if (await mock_info("pybridge")) {
         assert.rejects(
             cockpit.http({ port: test_server.port, connection: "one" }).get("/mock/connection"),
             ex => ex.problem == "protocol-error" && ex.status == undefined,
@@ -278,7 +322,7 @@ QUnit.test("http connection different", async assert => {
     assert.expect(1);
 
     // connection sharing is not implemented in the pybridge
-    if (await QUnit.mock_info("pybridge")) {
+    if (await mock_info("pybridge")) {
         assert.ok(true);
         return;
     }
@@ -296,7 +340,7 @@ QUnit.test("http connection without address", async assert => {
     assert.expect(1);
 
     // connection sharing is not implemented in the pybridge
-    if (await QUnit.mock_info("pybridge")) {
+    if (await mock_info("pybridge")) {
         assert.ok(true);
         return;
     }
@@ -363,7 +407,7 @@ QUnit.test("wrong options", async assert => {
         "rejects request with both port and unix option");
 
     // This is disallowed in the pybridge, but allowed in the C bridge
-    if (await QUnit.mock_info("pybridge")) {
+    if (await mock_info("pybridge")) {
         assert.rejects(
             cockpit.http({ unix: "/nonexisting/socket", tls: {} }).get("/"),
             ex => ex.problem == "protocol-error" && ex.status == undefined,
@@ -375,7 +419,7 @@ QUnit.test("wrong options", async assert => {
 
 QUnit.test("parallel stress test", async assert => {
     // This is way too slow under valgrind
-    if (await QUnit.mock_info("skip_slow_tests")) {
+    if (await mock_info("skip_slow_tests")) {
         assert.ok(true, "skipping on python bridge, not implemented");
         return;
     }

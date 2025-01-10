@@ -7,8 +7,8 @@ import testlib
 EXAMPLES_DIR = os.path.join(os.path.dirname(testlib.TEST_DIR), "examples")
 
 
+@testlib.skipBeiboot("no local overrides/config in beiboot mode")
 @testlib.nondestructive
-@testlib.skipDistroPackage()
 class TestPinger(testlib.MachineCase):
 
     def setUp(self):
@@ -35,8 +35,8 @@ class TestPinger(testlib.MachineCase):
         self.testBasic()
 
 
+@testlib.skipBeiboot("no local overrides/config in beiboot mode")
 @testlib.nondestructive
-@testlib.skipDistroPackage()
 class TestXHRProxy(testlib.MachineCase):
     def setUp(self):
         super().setUp()
@@ -79,8 +79,8 @@ class TestXHRProxy(testlib.MachineCase):
         b.wait_in_text("#output", "File not found")
 
 
+@testlib.skipBeiboot("no local overrides/config in beiboot mode")
 @testlib.nondestructive
-@testlib.skipDistroPackage()
 class TestLongRunning(testlib.MachineCase):
 
     def setUp(self):

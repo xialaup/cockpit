@@ -51,8 +51,12 @@ The response will look something like this
     "command": "authorize",
     "cookie": "cookie",
     "response": "Basic dXNlcjpwYXNzd29yZAo=",
+    "remote-peer": "1.2.3.4",
 }
 ```
+
+`remote-peer` is the IP address of the connecting user, if known (otherwise
+unset).
 
 A `*` challenge requests whatever credentials the parent process has. Most auth
 commands will want to begin by issuing a `*` challenge.
@@ -97,19 +101,20 @@ Remote machines
 
 Cockpit also supports logging directly into remote machines. The remote machine to
 connect to is provided by using a application name that begins with `cockpit+=`.
-The default command used for this is cockpit-ssh.
+The default command used for this is `python3 -m cockpit.beiboot`, which
+invokes `ssh`.
 
-The section `SSH-Login` defines the options for all ssh commands. The section
+The section `Ssh-Login` defines the options for all ssh commands. The section
 has the same options as the other authentication sections with the following additions.
 
- * `host` The default host to log into. Defaults to 127.0.0.1.
+ * `host` The default host to log into. Defaults to 127.0.0.1. That host's key
+   will not be checked/validated.
  * `connectToUnknownHosts`. By default cockpit will refuse to connect to any machines that
- are not already present in ssh's global `known_hosts` file (usually
- `/etc/ssh/ssh_known_hosts`). Set this to `true` is to allow those connections
- to proceed.
+   are not already present in ssh's global `known_hosts` file (usually
+   `/etc/ssh/ssh_known_hosts`). Set this to `true` is to allow those connections
+   to proceed.
 
-This uses the [cockpit-ssh](https://github.com/cockpit-project/cockpit/tree/main/src/ssh)
-bridge. After the user authentication with the `"*"` challenge, if the remote
+After the user authentication with the `"*"` challenge, if the remote
 host is not already present in any local `known_hosts` file, this will send an
 `"x-host-key"` challenge:
 
@@ -159,7 +164,7 @@ Actions
 Setting an action can modify the behavior for an auth scheme. Currently two actions
 are supported.
 
- * **remote-login-ssh** Use the `SSH-Login` section instead.
+ * **remote-login-ssh** Use the `Ssh-Login` section instead.
  * **none** Disable this auth scheme.
 
 To configure an action add the `action` option. For example to disable basic authentication,
@@ -187,11 +192,8 @@ for more details. This will affect how many custom authentication processes can 
 Environment Variables
 ---------------------
 
-The following environment variables are set by cockpit-ws when spawning an auth process:
-
- * **COCKPIT_REMOTE_PEER** Set to the ip address of the connecting user.
-
-The following environment variables are used to set options for the `cockpit-ssh` process:
+The following environment variables are set by cockpit-ws when spawning an auth process for
+SSH connections:
 
  * **COCKPIT_SSH_CONNECT_TO_UNKNOWN_HOSTS** Set to `1` to  allow connecting to
    hosts that are not present in the current `known_hosts` files. If not set,
@@ -201,6 +203,3 @@ The following environment variables are used to set options for the `cockpit-ssh
 
  * **COCKPIT_SSH_KNOWN_HOSTS_FILE** Path to knownhost files. Defaults to
    `PACKAGE_SYSCONF_DIR/ssh/ssh_known_hosts`
-
- * **COCKPIT_SSH_BRIDGE_COMMAND** Command to launch after a ssh connection is
-   established. Defaults to `cockpit-bridge` if not provided.

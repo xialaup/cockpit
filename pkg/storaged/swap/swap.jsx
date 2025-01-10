@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -26,7 +26,7 @@ import { DescriptionList } from "@patternfly/react-core/dist/esm/components/Desc
 import { useEvent } from "hooks";
 
 import { StorageCard, StorageDescription, new_card } from "../pages.jsx";
-import { format_dialog } from "../block/format-dialog.jsx";
+import { std_format_action } from "../block/actions.jsx";
 import {
     fmt_size, decode_filename, encode_filename,
     parse_options, unparse_options, extract_option,
@@ -97,7 +97,7 @@ export function make_swap_card(next, backing_block, content_block) {
             (block_swap && !block_swap.Active
                 ? { title: _("Start"), action: start }
                 : null),
-            { title: _("Format"), action: () => format_dialog(client, backing_block.path), danger: true },
+            std_format_action(backing_block, content_block),
         ]
     });
 }

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -188,7 +188,7 @@ export class LogEntry extends React.Component {
         }
 
         return (
-            <Page id="log-details">
+            <Page id="log-details" className="log-details">
                 <PageBreadcrumb stickyOnBreakpoint={{ default: "top" }}>
                     <Breadcrumb>
                         <BreadcrumbItem onClick={this.goHome} className="pf-v5-c-breadcrumb__link">{_("Logs")}</BreadcrumbItem>

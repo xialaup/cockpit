@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -42,7 +42,7 @@ get_libc_func(const char *f)
 
 /**
  * Change pw_dir to the value of $HOME for the current uid.
- * This is useful for libssh's expansion of ~ to point to our temporary test
+ * This is useful for ssh's expansion of ~ to point to our temporary test
  * $HOME instead of the real one from /etc/passwd.
  *
  */
@@ -55,7 +55,7 @@ int getpwuid_r(uid_t uid, struct passwd *pwd, char *buf, size_t buflen, struct p
         /* fprintf(stderr, "temp-home wrapped getpwuid_r(uid %i): changing original home %s to $HOME %s\n", (int) uid, pwd->pw_dir, getenv("HOME")); */
         /* note: in theory the caller might change this and thus change the
          * environment, but this is only for the unit tests where we know that
-         * libssh doesn't do that, so avoid any unnecessary copying here */
+         * nothing does that, so avoid any unnecessary copying here */
         pwd->pw_dir = getenv("HOME");
     }
     return res;

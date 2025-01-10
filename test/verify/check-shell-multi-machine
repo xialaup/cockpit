@@ -15,9 +15,10 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import re
+import subprocess
 import time
 
 import testlib
@@ -72,7 +73,7 @@ def kill_user_admin(machine):
     machine.execute("loginctl terminate-user admin")
 
 
-def change_ssh_port(machine, address, port=None, timeout_sec=120):
+def change_ssh_port(machine, address, sshd_socket, sshd_service, port=None, timeout_sec=120):
     try:
         port = int(port)
     except (ValueError, TypeError):
@@ -85,20 +86,23 @@ def change_ssh_port(machine, address, port=None, timeout_sec=120):
         machine.execute("setenforce 0")
     else:
         machine.execute(f"! selinuxenabled || semanage port -a -t ssh_port_t -p tcp {port}")
-    if machine.image in ["ubuntu-stable"]:  # always socket activated
+    if machine.image in ["ubuntu-2404", "ubuntu-stable"]:  # always socket activated
         machine.write("/etc/systemd/system/ssh.socket.d/override.conf",
                       f"[Socket]\nListenStream=\nListenStream=127.27.0.15:22\nListenStream={address}:{port}")
         machine.execute("systemctl daemon-reload")
         machine.execute("systemctl restart ssh.socket")
     else:
         machine.execute("sed -i 's/.*Port .*/#\\0/' /etc/ssh/sshd_config")
-        machine.execute(
-            f"printf 'ListenAddress 127.27.0.15:22\nListenAddress {address}:{port}\n' >> /etc/ssh/sshd_config")
+        machine.write("/etc/ssh/sshd_config",
+                      f"ListenAddress 127.27.0.15:22\nListenAddress {address}:{port}\n",
+                      append=True)
         # We stop the sshd.socket unit and just go with a regular
         # daemon.  This is more portable and reloading/restarting the
         # socket doesn't seem to work well.
         #
-        machine.execute("( ! systemctl is-active sshd.socket || systemctl stop sshd.socket) && systemctl restart sshd.service")
+        if sshd_socket:
+            machine.execute(f"systemctl stop {sshd_socket}")
+        machine.execute(f"systemctl restart {sshd_service}")
 
     start_time = time.time()
     error = None
@@ -113,8 +117,7 @@ def change_ssh_port(machine, address, port=None, timeout_sec=120):
     raise error
 
 
-@testlib.skipDistroPackage()
-@testlib.todoPybridgeRHEL8()
+@testlib.skipBeiboot("host switching disabled in beiboot mode")
 class TestMultiMachineAdd(testlib.MachineCase):
     provision = {
         "machine1": {"address": "10.111.113.1/20", "memory_mb": 660},
@@ -132,19 +135,21 @@ class TestMultiMachineAdd(testlib.MachineCase):
         # and failing to load sofware updates breaks pixel tests in release builds
         self.setup_provisioned_hosts(disable_preload=True)
         self.setup_ssh_auth()
+        self.enable_multihost(self.machine)
 
     def testBasic(self):
         b = self.browser
+        m = self.machine
         m2 = self.machine2
         m3 = self.machine3
         m3_host = "10.111.113.3:2222"
-        change_ssh_port(m3, "10.111.113.3", 2222)
+        change_ssh_port(m3, "10.111.113.3", self.sshd_socket, self.sshd_service, port=2222)
 
         hostname_selector = "#system_information_hostname_text"
 
         self.login_and_go(None)
-        self.add_machine("10.111.113.2", password=None)
-        self.add_machine(m3_host, password=None)
+        b.add_machine("10.111.113.2", password=None)
+        b.add_machine(m3_host, password=None, expect_warning=False)
 
         b.switch_to_top()
         b.click("#hosts-sel button")
@@ -190,18 +195,38 @@ class TestMultiMachineAdd(testlib.MachineCase):
                                     ".*: bridge failed: .*",
                                     ".*: bridge program failed: Child process exited with code .*")
 
+        # in a remote Shell secondary session, ssh-connecting to other machines happpens from primary machine
+        kill_user_admin(m3)
+        with b.wait_timeout(30):
+            b.wait_visible("#machine3-error")
+
+        b.click("a[href='/@10.111.113.2']")
+        b.wait_js_cond('window.location.pathname == "/@10.111.113.2/system"')
+        m.execute("while pgrep -af [s]sh.*10.111.113.3; do sleep 1; done", stdout=None)
+
+        b.go("/@10.111.113.2/playground/remote")
+        b.enter_page("/playground/remote", host="10.111.113.2")
+        b.set_input_text("#host", m3_host)
+        b.click("button")
+        # this works without dialog, as the SSH key get auto-unlocked with the user password
+        b.wait_text("#output", "machine3")
+
+        # the SSH connection originates from machine1, not 2
+        m.execute("pgrep -af [s]sh.*10.111.113.3", stdout=None)
+        m2.execute("! pgrep -af [s]sh.*10.111.113.3", stdout=None)
+
     def testGlobalSSHConfig(self):
         b = self.browser
         m = self.machine
         m3 = self.machine3
 
-        change_ssh_port(m3, "10.111.113.3", 2222)
+        change_ssh_port(m3, "10.111.113.3", self.sshd_socket, self.sshd_service, port=2222)
         m.write("/etc/ssh/ssh_config", "Host m2\n\tHostName 10.111.113.2\n", append=True)
         m.write("/etc/ssh/ssh_config", "Host m3\n\tHostName 10.111.113.3\n\tPort 2222\n", append=True)
 
         self.login_and_go(None)
-        self.add_machine("m2", password=None)
-        self.add_machine("m3", password=None)
+        b.add_machine("m2", password=None)
+        b.add_machine("m3", password=None, expect_warning=False)
 
         b.switch_to_top()
         b.click("#hosts-sel button")
@@ -212,7 +237,7 @@ class TestMultiMachineAdd(testlib.MachineCase):
         self.allow_hostkey_messages()
 
 
-@testlib.skipDistroPackage()
+@testlib.skipBeiboot("host switching disabled in beiboot mode")
 class TestMultiMachine(testlib.MachineCase):
     provision = {
         "machine1": {"address": "10.111.113.1/20", "memory_mb": 660},
@@ -228,6 +253,7 @@ class TestMultiMachine(testlib.MachineCase):
         self.allow_journal_messages("sudo: unable to resolve host machine1: .*")
 
         self.setup_provisioned_hosts(disable_preload=True)
+        self.enable_multihost(self.machine)
 
     def checkDirectLogin(self, root='/', known_host=False):
         b = self.browser
@@ -265,13 +291,32 @@ class TestMultiMachine(testlib.MachineCase):
         b.switch_to_top()
 
         b.wait_js_cond(f'window.location.pathname == "{root}=10.111.113.2/system"')
+        b.wait_in_text("#hosts-sel", "machine2")
 
-        b.click("#hosts-sel button")
-        b.wait_in_text(f"a[href='{root}=10.111.113.2/@localhost']", "machine2")
-        b.wait_not_present("a[href='/@10.111.113.2']")
+        # This is a primary session, we can also ssh onwards to other machines
+
+        b.go("/playground/remote")
+        b.enter_page("/playground/remote")
+        b.set_input_text("#host", "10.111.113.3")
+        b.click("button")
+        b.wait_text("#ssh-unknown-host-dialog .pf-v5-c-modal-box__title-text", "Unknown host: 10.111.113.3")
+        b.click("#ssh-unknown-host-dialog button.pf-m-primary")
+        b.wait_not_present("#ssh-unknown-host-dialog")
+
+        b.wait_text("#ssh-change-auth-dialog .pf-v5-c-modal-box__title-text", "Log in to 10.111.113.3")
+        b.set_input_text("#login-custom-password", "foobar")
+        b.click("#ssh-change-auth-dialog button.pf-m-primary")
+        b.wait_not_present("#ssh-change-auth-dialog")
+        b.wait_text("#output", "machine3")
+
+        # the SSH connection originates from machine2, not 1
+        m2.execute("pgrep -af [s]sh.*10.111.113.3", stdout=None)
+        m.execute("! pgrep -af [s]sh.*10.111.113.3", stdout=None)
+
         b.logout()
 
         # Bad host key
+        b.eval_js("""window.localStorage.setItem("known_hosts", '{}')""")
         m.write("/etc/ssh/ssh_known_hosts", "10.111.113.2 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDgPMmTosSQ4NxMtq+aL2NKLC+W4I9/jbD1e74cnOKTW")
         b.open(f"{root}=10.111.113.2")
         b.wait_visible("#login")
@@ -284,7 +329,8 @@ class TestMultiMachine(testlib.MachineCase):
         b.wait_visible("#user-group")
         b.wait_visible("#option-group")
         b.wait_visible("#server-group")
-        b.wait_in_text("#login-error-message", "Hostkey does not match")
+        b.wait_text("#login-error-title", "Refusing to connect")
+        b.wait_text("#login-error-message", "Hostkey does not match")
 
         # Clear bad host key in /etc and set bad host key in
         # localStorage.
@@ -311,6 +357,26 @@ class TestMultiMachine(testlib.MachineCase):
         b.wait_in_text(hostname_selector, "machine2")
         b.logout()
 
+        # beiboot mode: same OS → compatible, supported
+        break_bridge(m2)
+        b.try_login(password="alt-password")
+        b.wait_visible('#content')
+        b.logout()
+
+        # beiboot mode: future OS version → incompatible, not supported
+        # rolling OSes don't have a VERSION_ID
+        if m.image not in ["arch", "debian-testing"]:
+            m2.execute("sed -i '/^VERSION_ID/ s/$/1/' /etc/os-release")
+            b.try_login(password="alt-password")
+            source_os = m.execute('. /etc/os-release; echo "$NAME $VERSION_ID"').strip()
+            b.wait_text('#login-error-title', "Packageless session unavailable")
+            b.wait_in_text('#login-error-message', "Transient packageless sessions")
+            b.wait_in_text('#login-error-message', source_os)
+            b.wait_in_text('#login-error-message', "Install the cockpit-system package")
+            b.wait_in_text('#login-error-message', "on 10.111.113.2")
+
+        fix_bridge(m2)
+
         login_options = '#show-other-login-options'
 
         # Connect to bad machine
@@ -324,7 +390,8 @@ class TestMultiMachine(testlib.MachineCase):
         b.wait_not_visible("#server-group")
         b.click('#login-button')
         b.wait_visible("#server-group")
-        b.wait_in_text("#login-error-message", "Unable to connect")
+        b.wait_text("#login-error-title", "Refusing to connect")
+        b.wait_text("#login-error-message", "Host is unknown")
 
         # Might happen when we switch away.
         self.allow_hostkey_messages()
@@ -334,14 +401,46 @@ class TestMultiMachine(testlib.MachineCase):
         self.machine.start_cockpit()
         self.checkDirectLogin('/')
 
-    @testlib.todoPybridgeRHEL8()
+        # Also check whether AllowMultiHost blocks access already in cockpit-ws.
+
+        b = self.browser
+        m = self.machine
+
+        self.enable_multihost(m)
+        self.setup_ssh_auth()
+
+        # login into cockpit on machine1
+        self.login_and_go("/system")
+        cookie = b.cookie("cockpit")
+
+        def http_code(url):
+            return int(subprocess.check_output(["curl",
+                                                "--silent",
+                                                "-b", f"cockpit={cookie['value']}",
+                                                "-o", "/dev/null", "-w", "%{http_code" + "}",
+                                                f"http://{b.address}:{b.port}{url}"]))
+
+        # Now we can get resources from machine1 and machine2
+        self.assertEqual(200, http_code("/cockpit/@localhost/manifests.json"))
+        self.assertEqual(200, http_code("/cockpit/@10.111.113.2/manifests.json"))
+
+        # But not when AllowMultiHost is false
+        m.write("/etc/cockpit/cockpit.conf",
+                '[WebService]\nAllowMultiHost=no\n')
+        m.restart_cockpit()
+        b.relogin("/system")
+        cookie = b.cookie("cockpit")
+
+        self.assertEqual(200, http_code("/cockpit/@localhost/manifests.json"))
+        self.assertEqual(403, http_code("/cockpit/@10.111.113.2/manifests.json"))
+
     def testUrlRoot(self):
         b = self.browser
         m = self.machine
 
         hostname_selector = "#system_information_hostname_text"
 
-        m.write("/etc/cockpit/cockpit.conf", "[WebService]\nUrlRoot = cockpit-new")
+        m.write("/etc/cockpit/cockpit.conf", "[WebService]\nUrlRoot = cockpit-new\nAllowMultiHost=yes\n")
         m.start_cockpit()
 
         # Make sure normal urls don't work.
@@ -361,7 +460,7 @@ class TestMultiMachine(testlib.MachineCase):
         b.wait_js_cond('window.location.pathname == "/cockpit-new/system"')
 
         # Test 2nd machine
-        self.add_machine("10.111.113.2")
+        b.add_machine("10.111.113.2")
         b.enter_page("/system", host="10.111.113.2")
         b.wait_text(hostname_selector, "machine2")
         b.switch_to_top()
@@ -396,7 +495,6 @@ class TestMultiMachine(testlib.MachineCase):
         b.switch_to_top()
         b.wait_js_cond('window.location.pathname == "/cockpit-new/system"')
 
-    @testlib.todoPybridgeRHEL8()
     def testExternalPage(self):
         b = self.browser
         m1 = self.machine
@@ -414,7 +512,7 @@ class TestMultiMachine(testlib.MachineCase):
                 mount -o bind /tmp/"$(basename $FILENAME)" $FILENAME""")
 
         self.login_and_go("/system")
-        self.add_machine("10.111.113.2")
+        b.add_machine("10.111.113.2")
 
         b.leave_page()
         b.go("/@10.111.113.2/system/terminal")
@@ -428,7 +526,6 @@ class TestMultiMachine(testlib.MachineCase):
 
         self.allow_hostkey_messages()
 
-    @testlib.todoPybridgeRHEL8()
     def testFrameNavigation(self):
         b = self.browser
         m2 = self.machine2
@@ -437,7 +534,7 @@ class TestMultiMachine(testlib.MachineCase):
 
         # Add a machine
         self.login_and_go(None)
-        self.add_machine("10.111.113.2")
+        b.add_machine("10.111.113.2")
 
         # Go to the path, remove the image
         b.go(m2_path)
@@ -464,8 +561,11 @@ class TestMultiMachine(testlib.MachineCase):
         # navigating there again will fail
         b.go(m2_path)
         with b.wait_timeout(30):
-            b.wait_text(".curtains-ct h1", "Not connected to host")
-        b.wait_text("#machine-troubleshoot", "Log in")
+            b.wait_visible("#hosts_setup_server_dialog")
+        b.start_machine_troubleshoot(expect_curtain=False, password="foobar",
+                                     expect_closed_dialog=False, expect_warning=False)
+        b.wait_in_text("#hosts_setup_server_dialog .pf-v5-c-alert", "Login failed")
+        b.click("#hosts_setup_server_dialog button:contains(Cancel)")
 
         # wait for system to load
         b.go("/system")
@@ -480,8 +580,8 @@ class TestMultiMachine(testlib.MachineCase):
         b.reload()
         b.go(m2_path)
         with b.wait_timeout(30):
-            b.wait_text(".curtains-ct h1", "Not connected to host")
-        self.start_machine_troubleshoot(password="foobar")
+            b.wait_visible("#hosts_setup_server_dialog")
+        b.start_machine_troubleshoot(expect_curtain=False, password="foobar", expect_warning=False)
 
         b.enter_page("/playground/test", "10.111.113.2", reconnect=True)
         # image is back because it page was reloaded after disconnection
@@ -509,24 +609,28 @@ class TestMultiMachine(testlib.MachineCase):
                                     ".*: bridge program failed: Child process exited with code .*",
                                     "/playground/test.html: failed to retrieve resource: authentication-failed")
 
-    @testlib.todoPybridgeRHEL8()
     def testFrameReload(self):
         b = self.browser
+        m2 = self.machines["machine2"]
 
         frame = "cockpit1:10.111.113.2/playground/test"
         m2_path = "/@10.111.113.2/playground/test"
 
         # Add a machine
         self.login_and_go(None)
-        self.add_machine("10.111.113.2")
+        b.add_machine("10.111.113.2")
 
         b.switch_to_top()
         b.go(m2_path)
         b.enter_page("/playground/test", "10.111.113.2")
 
-        b.wait_text('#file-content', "0")
-        b.click("#modify-file")
-        b.wait_text('#file-content', "1")
+        # Check that channels are closed when a frame is reloaded.
+
+        # Lock a file on m2, that keeps a channel open.
+        m2.execute("touch /tmp/playground-test-lock")
+        b.click(".lock-channel button")
+        b.wait_in_text(".lock-channel span", 'locked')
+        m2.execute("! flock --nonblock /tmp/playground-test-lock true")
 
         # load the same page on m1
         b.switch_to_top()
@@ -534,24 +638,21 @@ class TestMultiMachine(testlib.MachineCase):
         b.enter_page("/playground/test")
         b.wait_text('#file-content', "0")
 
-        # go back to m2 and reload frame.
-        b.switch_to_top()
+        # Now reload the m2 frame by kicking its "src" attribute.
         b.go(m2_path)
         b.enter_page("/playground/test", "10.111.113.2")
-        b.wait_text('#file-content', "1")
+        b.wait_in_text(".lock-channel span", 'locked')
         b.switch_to_top()
-
-        b.eval_js('ph_set_attr("iframe[name=\'%s\']", "data-ready", null)' % frame)
         b.eval_js('ph_set_attr("iframe[name=\'%s\']", "src", "../playground/test.html?i=1#/")' % frame)
-        b.wait_visible(f"iframe.container-frame[name='{frame}'][data-ready]")
+
+        # The channel and the lock should have gone away
+        m2.execute("flock --timeout 10 /tmp/playground-test-lock true")
 
         b.enter_page("/playground/test", "10.111.113.2")
-
-        b.wait_text('#file-content', "1")
+        b.wait_not_in_text(".lock-channel span", 'locked')
 
         self.allow_hostkey_messages()
 
-    @testlib.todoPybridgeRHEL8()
     def testTroubleshooting(self):
         b = self.browser
         m1 = self.machine
@@ -559,7 +660,7 @@ class TestMultiMachine(testlib.MachineCase):
 
         # Logging in as root is no longer allowed by default by sshd
         m2.execute("sed -ri 's/#?PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config")
-        m2.execute("systemctl restart sshd")
+        m2.execute(self.restart_sshd)
 
         machine_path = "/@10.111.113.2"
 
@@ -570,7 +671,7 @@ class TestMultiMachine(testlib.MachineCase):
 
         # Bad hostkey
         break_hostkey(m1, "10.111.113.2")
-        self.start_machine_troubleshoot(new=True, known_host=True, expect_closed_dialog=False)
+        b.start_machine_troubleshoot(new=True, known_host=True, expect_closed_dialog=False)
         b.wait_in_text('#hosts_setup_server_dialog', "10.111.113.2 key changed")
         b.click("#hosts_setup_server_dialog button:contains(Cancel)")
         b.wait_not_present('#hosts_setup_server_dialog')
@@ -580,21 +681,21 @@ class TestMultiMachine(testlib.MachineCase):
         m1.execute("mkdir -p /home/admin/.ssh/")
         break_hostkey(m1, "10.111.113.2")
 
-        self.start_machine_troubleshoot(new=True, known_host=True, expect_closed_dialog=False)
+        b.start_machine_troubleshoot(new=True, known_host=True, expect_closed_dialog=False, expect_warning=False)
         b.wait_in_text('#hosts_setup_server_dialog', "10.111.113.2 key changed")
         b.click("#hosts_setup_server_dialog button:contains(Cancel)")
         fix_hostkey(m1)
 
         # Bad cockpit
         break_bridge(m2)
-        self.start_machine_troubleshoot(new=True, password="foobar", expect_closed_dialog=False)
+        b.start_machine_troubleshoot(new=True, password="foobar", expect_closed_dialog=False, expect_warning=False)
         check_failed_state(b, "Cockpit is not installed")
         fix_bridge(m2)
 
         # Troubleshoot existing
         # Properly add machine
         fix_hostkey(m1)
-        self.add_machine("10.111.113.2")
+        b.add_machine("10.111.113.2", expect_warning=False)
         b.logout()
         b.wait_visible("#login")
 
@@ -602,16 +703,17 @@ class TestMultiMachine(testlib.MachineCase):
         break_bridge(m2)
         self.login_and_go(None)
         b.go(machine_path)
-        with b.wait_timeout(240):
-            self.start_machine_troubleshoot(password="foobar", expect_closed_dialog=False)
+        with b.wait_timeout(20):
+            b.start_machine_troubleshoot(expect_curtain=False, password="foobar", expect_closed_dialog=False)
 
         check_failed_state(b, "Cockpit is not installed")
-        b.wait_visible("#machine-troubleshoot")
+        b.wait_visible("#machine-reconnect")
         fix_bridge(m2)
 
         # Clear host key
         fix_hostkey(m1)
-        self.start_machine_troubleshoot(expect_closed_dialog=False)
+        b.click("#machine-reconnect")
+        b.start_machine_troubleshoot(expect_curtain=False, expect_closed_dialog=False, expect_warning=False)
         b.wait_in_text('#hosts_setup_server_dialog', "You are connecting to 10.111.113.2 for the first time.")
 
         # show fingerprint validation
@@ -630,11 +732,11 @@ class TestMultiMachine(testlib.MachineCase):
         b.set_input_text('#login-custom-password', "foobar")
         # Submit the dialog with Enter instead of clicking the Login button, for variety
         b.focus("#login-custom-password")
-        b.key_press("\r")
+        b.key("Enter")
         b.wait_not_present('#hosts_setup_server_dialog')
 
         # Reconnect
-        b.wait_not_visible(".curtains-ct")
+        b.wait_not_present(".curtains-ct")
         b.enter_page('/system', "10.111.113.2")
 
         b.logout()
@@ -645,13 +747,10 @@ class TestMultiMachine(testlib.MachineCase):
         self.login_and_go(None)
         b.go(machine_path)
 
-        with b.wait_timeout(120):
-            b.wait_visible("#machine-troubleshoot")
-        self.start_machine_troubleshoot(expect_closed_dialog=False)
+        with b.wait_timeout(20):
+            b.wait_visible("#hosts_connect_server_dialog")
+        b.start_machine_troubleshoot(expect_curtain=False, expect_closed_dialog=False)
         b.wait_in_text('#hosts_setup_server_dialog', "Unable to log in")
-        b.set_input_text('#login-custom-password', "")
-        fail_login(b)
-
         b.set_input_text("#login-custom-password", "bad")
         fail_login(b)
         b.set_input_text("#login-custom-password", "alt-password")
@@ -659,34 +758,30 @@ class TestMultiMachine(testlib.MachineCase):
         b.wait_not_present('#hosts_setup_server_dialog')
 
         # Reconnect
-        b.wait_not_visible(".curtains-ct")
+        b.wait_not_present(".curtains-ct")
         b.enter_page('/system', "10.111.113.2")
         b.logout()
         b.wait_visible("#login")
 
-        change_ssh_port(m2, "10.111.113.2", 2222)
+        change_ssh_port(m2, "10.111.113.2", self.sshd_socket, self.sshd_service, port=2222)
         m2.disconnect()
         del self.machines["machine2"]  # No more access to m2
 
         self.login_and_go(None)
         b.go(machine_path)
-        with b.wait_timeout(120):
-            b.wait_visible("#machine-troubleshoot")
-        self.start_machine_troubleshoot(expect_closed_dialog=False)
-        b.wait_in_text('#hosts_setup_server_dialog h1', "Could not contact")
-        b.set_input_text("#edit-machine-port", "2222")
+        with b.wait_timeout(20):
+            b.wait_visible("#hosts_connect_server_dialog")
+        b.start_machine_troubleshoot(expect_curtain=False, expect_closed_dialog=False)
+        b.wait_in_text('#hosts_setup_server_dialog', "Unable to contact")
+        b.set_input_text("#add-machine-address", "10.111.113.2:2222")
         b.click(f'#hosts_setup_server_dialog {self.primary_btn_class}')
-        if not self.is_pybridge():
-            # Using libssh's knownhosts api port is taken into account when verifying a host
-            # with python bridge, ssh(1) tracks known hosts by name/IP, not by port
-            b.wait_in_text('#hosts_setup_server_dialog', "You are connecting to 10.111.113.2 for the first time.")
-            b.click("#hosts_setup_server_dialog button:contains('Trust and add host')")
+        # ssh(1) tracks known hosts by name/IP, not by port; so not expecting a host key prompt here
         b.wait_in_text('#hosts_setup_server_dialog h1', "Log in to")
         b.set_input_text("#login-custom-password", "alt-password")
         b.click(f'#hosts_setup_server_dialog {self.primary_btn_class}')
         b.wait_not_present('#hosts_setup_server_dialog')
 
-        b.wait_not_visible(".curtains-ct")
+        b.wait_not_present(".curtains-ct")
         b.enter_page('/system', "10.111.113.2:2222")
         b.logout()
 
@@ -703,7 +798,6 @@ class TestMultiMachine(testlib.MachineCase):
                                     '.*: server offered unsupported authentication methods: .*')
 
     @testlib.skipImage("TODO: Broken on Arch Linux", "arch")
-    @testlib.todoPybridgeRHEL8()
     def testSshKeySetup(self):
         b = self.browser
         m1 = self.machine
@@ -718,12 +812,13 @@ class TestMultiMachine(testlib.MachineCase):
 
         self.login_and_go(None)
         b.go("/@10.111.113.2")
-        self.start_machine_troubleshoot(expect_closed_dialog=False)
         b.click('#machine-troubleshoot')
         b.wait_visible('#hosts_setup_server_dialog')
         b.wait_in_text('#hosts_setup_server_dialog', "new host")
         b.set_input_text('#add-machine-user', "fred")
         b.click('#hosts_setup_server_dialog button:contains(Add)')
+        b.wait_visible('#hosts_connect_server_dialog')
+        b.click("#hosts_connect_server_dialog button.pf-m-warning")
         b.wait_in_text('#hosts_setup_server_dialog', "You are connecting to 10.111.113.2 for the first time.")
         b.click("#hosts_setup_server_dialog button:contains('Trust and add host')")
         b.wait_in_text('#hosts_setup_server_dialog', "Unable to log in")
@@ -749,14 +844,17 @@ class TestMultiMachine(testlib.MachineCase):
         self.assertEqual(m1.execute("cat /home/admin/.ssh/id_rsa.pub"),
                          m2.execute("cat /home/fred/.ssh/authorized_keys"))
 
-        # Relogin.  This should now work seamlessly.
+        # Relogin.  This should now work seamlessly (except for the warning).
         b.relogin(None, wait_remote_session_machine=m1)
+        b.wait_visible('#hosts_connect_server_dialog')
+        b.click("#hosts_connect_server_dialog button.pf-m-warning")
         b.enter_page("/system", host="fred@10.111.113.2")
 
         # De-authorize key and relogin, then re-authorize.
         m2.execute("rm /home/fred/.ssh/authorized_keys")
         b.relogin(None, wait_remote_session_machine=m1)
-        b.click('#machine-troubleshoot')
+        b.wait_visible('#hosts_connect_server_dialog')
+        b.click("#hosts_connect_server_dialog button.pf-m-warning")
         b.wait_visible('#hosts_setup_server_dialog')
         b.wait_in_text('#hosts_setup_server_dialog', "Unable to log in")
         b.wait_in_text("#hosts_setup_server_dialog", "Authorize SSH key")
@@ -772,7 +870,8 @@ class TestMultiMachine(testlib.MachineCase):
         # change the passphrase back to the login password
         m1.execute("ssh-keygen -q -f /home/admin/.ssh/id_rsa -p -P foobar -N foobarfoo")
         b.relogin(None, wait_remote_session_machine=m1)
-        b.click('#machine-troubleshoot')
+        b.wait_visible('#hosts_connect_server_dialog')
+        b.click("#hosts_connect_server_dialog button.pf-m-warning")
         b.wait_visible('#hosts_setup_server_dialog')
         b.wait_in_text('#hosts_setup_server_dialog', "The SSH key for logging in")
         b.set_checked('#hosts_setup_server_dialog input[value=key]', val=True)
@@ -784,10 +883,12 @@ class TestMultiMachine(testlib.MachineCase):
         b.wait_not_present('#hosts_setup_server_dialog')
         b.enter_page("/system", host="fred@10.111.113.2")
 
-        # Relogin.  This should now work seamlessly (except on fedora-coreos and rhel4edge
+        # Relogin.  This should now work seamlessly (except on OSTree images
         # which don't have pam-ssh-add in its PAM stack.)
         if not m1.ostree_image:
             b.relogin(None, wait_remote_session_machine=m1)
+            b.wait_visible('#hosts_connect_server_dialog')
+            b.click("#hosts_connect_server_dialog button.pf-m-warning")
             b.enter_page("/system", host="fred@10.111.113.2")
 
         # The authorized_keys files should still only have a single key
@@ -796,7 +897,6 @@ class TestMultiMachine(testlib.MachineCase):
 
         self.allow_hostkey_messages()
 
-    @testlib.todoPybridgeRHEL8()
     def testSshKeySetupCustom(self):
         b = self.browser
         m1 = self.machine
@@ -821,6 +921,8 @@ class TestMultiMachine(testlib.MachineCase):
         b.click('#machine-troubleshoot')
         b.wait_visible('#hosts_setup_server_dialog')
         b.click('#hosts_setup_server_dialog button:contains(Add)')
+        b.wait_visible('#hosts_connect_server_dialog')
+        b.click('#hosts_connect_server_dialog button:contains(Connect)')
         b.wait_in_text('#hosts_setup_server_dialog', "You are connecting to 10.111.113.2 for the first time.")
         b.click("#hosts_setup_server_dialog button:contains('Trust and add host')")
         b.wait_in_text('#hosts_setup_server_dialog', "The SSH key")

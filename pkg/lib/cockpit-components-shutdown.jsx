@@ -14,26 +14,26 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
 import React from 'react';
 import { Button } from "@patternfly/react-core/dist/esm/components/Button/index.js";
-import { Select, SelectOption } from "@patternfly/react-core/dist/esm/deprecated/components/Select/index.js";
 import { Modal } from "@patternfly/react-core/dist/esm/components/Modal/index.js";
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { Flex } from "@patternfly/react-core/dist/esm/layouts/Flex/index.js";
 import { Form, FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
-import { Divider } from "@patternfly/react-core/dist/esm/components/Divider/index.js";
 import { TextArea } from "@patternfly/react-core/dist/esm/components/TextArea/index.js";
 import { DatePicker } from "@patternfly/react-core/dist/esm/components/DatePicker/index.js";
 import { TimePicker } from "@patternfly/react-core/dist/esm/components/TimePicker/index.js";
 
 import { ServerTime } from 'serverTime.js';
-import * as timeformat from "timeformat.js";
+import * as timeformat from "timeformat";
 import { DialogsContext } from "dialogs.jsx";
 import { FormHelper } from "cockpit-components-form-helper";
+
+import { SimpleSelect } from "cockpit-components-simple-select";
 
 import "cockpit-components-shutdown.scss";
 
@@ -71,9 +71,9 @@ export class ShutdownModal extends React.Component {
         this.server_time.wait()
                 .then(() => {
                     const dateObject = this.server_time.utc_fake_now;
-                    const date = timeformat.dateShort(dateObject);
-                    const hour = this.server_time.utc_fake_now.getUTCHours();
-                    const minute = this.server_time.utc_fake_now.getUTCMinutes();
+                    const date = dateObject.toISOString().split("T")[0];
+                    const hour = dateObject.getUTCHours();
+                    const minute = dateObject.getUTCMinutes();
                     this.setState({
                         dateObject,
                         date,
@@ -143,7 +143,7 @@ export class ShutdownModal extends React.Component {
         this.date_spawn.catch(e => {
             if (e.problem == "cancelled")
                 return;
-            this.setState({ error: e.message });
+            this.setState({ error: e.toString() });
         });
         this.date_spawn.finally(() => { this.date_spawn = null });
     }
@@ -154,9 +154,9 @@ export class ShutdownModal extends React.Component {
         if (!this.props.shutdown)
             cockpit.hint("restart");
 
-        cockpit.spawn(["shutdown", arg, this.state.when, this.state.message], { superuser: true, err: "message" })
+        cockpit.spawn(["shutdown", arg, this.state.when, this.state.message], { superuser: "require", err: "message" })
                 .then(this.props.onClose || Dialogs.close)
-                .catch(e => this.setState({ error: e }));
+                .catch(e => this.setState({ error: e.toString() }));
 
         event.preventDefault();
         return false;
@@ -172,15 +172,15 @@ export class ShutdownModal extends React.Component {
     render() {
         const Dialogs = this.context;
         const options = [
-            <SelectOption value="0" key="0">{_("No delay")}</SelectOption>,
-            <Divider key="divider" component="li" />,
-            <SelectOption value="1" key="1">{_("1 minute")}</SelectOption>,
-            <SelectOption value="5" key="5">{_("5 minutes")}</SelectOption>,
-            <SelectOption value="20" key="20">{_("20 minutes")}</SelectOption>,
-            <SelectOption value="40" key="40">{_("40 minutes")}</SelectOption>,
-            <SelectOption value="60" key="60">{_("60 minutes")}</SelectOption>,
-            <Divider key="divider-2" component="li" />,
-            <SelectOption value="x" key="x">{_("Specific time")}</SelectOption>
+            { value: "0", content: _("No delay") },
+            { decorator: "divider", key: "divider" },
+            { value: "1", content: _("1 minute") },
+            { value: "5", content: _("5 minutes") },
+            { value: "20", content: _("20 minutes") },
+            { value: "40", content: _("40 minutes") },
+            { value: "60", content: _("60 minutes") },
+            { decorator: "divider", key: "divider-2" },
+            { value: "x", content: _("Specific time") },
         ];
 
         return (
@@ -200,30 +200,22 @@ export class ShutdownModal extends React.Component {
                         </FormGroup>
                         <FormGroup fieldId="delay" label={_("Delay")}>
                             <Flex className="shutdown-delay-group" alignItems={{ default: 'alignItemsCenter' }}>
-                                <Select toggleId="delay" isOpen={this.state.isOpen} selections={this.state.selected}
-                                        isDisabled={!this.state.formFilled}
-                                        className='shutdown-select-delay'
-                                        onToggle={(_event, o) => this.setState({ isOpen: o })} menuAppendTo="parent"
-                                        onSelect={(e, s) => this.setState({ selected: s, isOpen: false }, this.calculate)}>
-                                    {options}
-                                </Select>
+                                <SimpleSelect
+                                    toggleProps={{ id: "delay", className: 'shutdown-select-delay' }}
+                                    options={options}
+                                    selected={this.state.selected}
+                                    isDisabled={!this.state.formFilled}
+                                    onSelect={s => this.setState({ selected: s }, this.calculate)} />
                                 {this.state.selected === "x" && <>
                                     <DatePicker aria-label={_("Pick date")}
                                                 buttonAriaLabel={_("Toggle date picker")}
                                                 className='shutdown-date-picker'
-                                                dateFormat={timeformat.dateShort}
-                                                // https://github.com/patternfly/patternfly-react/issues/9721
-                                                dateParse={date => {
-                                                    const newDate = timeformat.parseShortDate(date);
-                                                    return Number.isNaN(newDate.valueOf()) ? false : newDate;
-                                                }}
                                                 invalidFormatText=""
                                                 isDisabled={!this.state.formFilled}
                                                 locale={timeformat.dateFormatLang()}
                                                 weekStart={timeformat.firstDayOfWeek()}
                                                 onBlur={this.calculate}
                                                 onChange={(_, d, ds) => this.updateDate(d, ds)}
-                                                placeholder={timeformat.dateShortFormat()}
                                                 validators={[this.dateRangeValidator]}
                                                 value={this.state.date}
                                                 appendTo={() => document.body} />

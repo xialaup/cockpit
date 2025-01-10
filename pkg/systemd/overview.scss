@@ -7,11 +7,8 @@
 .ct-limited-access-alert {
   --pf-v5-c-alert--GridTemplateColumns: auto auto 1fr;
 
-  // Fix vertical alignment
-  // Unset the H4 line-height (as PF3/Bootstrap/etc. sets it; PF4 doesn't)
-  > .pf-v5-c-alert__title {
-    line-height: unset;
-  }
+  // Set the right padding so that the button aligns with the other alerts in the page on the side
+  padding-inline-end: var(--pf-v5-c-page__main-section--PaddingRight);
 
   // Deconstruct nicely on small screen sizes (especially mobile)
   // This will not be needed in a future PF4 update
@@ -32,9 +29,6 @@
     // Allow the action button to have a bit more space on iPhone SE sized phones
     grid-template-areas: "icon title" ". content" "action action";
   }
-
-  // Set the right padding so that the button aligns with the other alerts in the page on the side
-  padding-inline-end: var(--pf-v5-c-page__main-section--PaddingRight);
 
   > .pf-v5-c-alert__action {
     margin-inline: var(--pf-v5-global--spacer--md) 0;

@@ -15,12 +15,11 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import testlib
 
 
-@testlib.skipDistroPackage()
 @testlib.nondestructive
 class TestReauthorize(testlib.MachineCase):
     def testBasic(self):
@@ -60,7 +59,7 @@ class TestReauthorize(testlib.MachineCase):
         b.wait_in_text(".cockpit-internal-reauthorize span", 'result:')
         self.assertEqual(b.text(".cockpit-internal-reauthorize span"), 'result: access-denied')
 
-    @testlib.skipOstree("ssh root login not allowed")
+    @testlib.skipWsContainer("ssh root login not allowed")
     def testSuper(self):
         b = self.browser
 

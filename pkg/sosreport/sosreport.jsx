@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import '../lib/patternfly/patternfly-5-cockpit.scss';
@@ -40,10 +40,13 @@ import { EyeIcon, EyeSlashIcon } from '@patternfly/react-icons';
 
 import { EmptyStatePanel } from "cockpit-components-empty-state.jsx";
 import { ListingTable } from "cockpit-components-table.jsx";
+import { basename as path_basename } from "cockpit-path";
 
 import cockpit from "cockpit";
-import { superuser } from "superuser";
 import { useObject, useEvent } from "hooks";
+import { superuser } from "superuser";
+import * as python from "python";
+import { FsInfoClient } from "cockpit/fsinfo";
 
 import { SuperuserButton } from "../shell/superuser.jsx";
 
@@ -52,6 +55,8 @@ import * as timeformat from "timeformat";
 import { WithDialogs, useDialogs } from "dialogs.jsx";
 import { FormHelper } from "cockpit-components-form-helper";
 import { KebabDropdown } from "cockpit-components-dropdown";
+
+import get_report_dir_py from "./get_report_dir.py";
 
 import './sosreport.scss';
 
@@ -70,10 +75,9 @@ function sosLister() {
         self.dispatchEvent("changed");
     }
 
-    function parse_report_name(path) {
-        const basename = path.replace(/.*\//, "");
+    function parse_report_name(name, date) {
         const archive_rx = /^(secured-)?sosreport-(.*)\.tar\.[^.]+(\.gpg)?$/;
-        const m = basename.match(archive_rx);
+        const m = name.match(archive_rx);
         if (m) {
             let name = m[2];
             let obfuscated = false;
@@ -83,57 +87,56 @@ function sosLister() {
             }
 
             return {
+                name,
                 encrypted: !!m[1],
                 obfuscated,
-                name
+                date,
             };
         }
     }
 
-    function update_reports() {
-        cockpit.script('find /var/tmp -maxdepth 1 -name \'*sosreport-*.tar.*\' -print0 | xargs -0 -r stat --printf="%n\\r%W\\n"', { superuser: true, err: "message" })
-                .then(output => {
-                    const reports = { };
-                    const lines = output.split("\n");
-                    for (const line of lines) {
-                        const [path, date] = line.split("\r");
-                        const report = parse_report_name(path);
-                        if (report) {
-                            report.date = Number(date);
-                            reports[path] = report;
-                        }
-                    }
-                    self.reports = reports;
-                    self.ready = true;
-                    emit_changed();
-                })
-                .catch(err => {
-                    self.problem = err.problem || err.message;
-                    self.ready = true;
-                    emit_changed();
-                });
-    }
+    let fsinfo = null;
 
-    let watch = null;
-
-    function restart() {
+    async function restart() {
         if (superuser.allowed === null)
             return;
 
-        if (watch)
-            watch.close("cancelled");
+        if (fsinfo)
+            fsinfo.close();
         self.ready = false;
         self.problem = null;
-        watch = null;
 
-        watch = cockpit.channel({ payload: "fswatch1", path: "/var/tmp", superuser: true });
-        watch.addEventListener("message", (event, payload) => {
-            const msg = JSON.parse(payload);
-            if (msg.event != "present" && parse_report_name(msg.path))
-                update_reports();
+        const report_dir = (await python.spawn(get_report_dir_py)).trim();
+
+        fsinfo = new FsInfoClient(report_dir, ["entries", "mtime", "type"], { superuser: "require" });
+        fsinfo.on("change", state => {
+            if (state.loading)
+                return;
+            if (state.error) { // Should Not Happen™, realistic errors come through close event
+                console.warn("Failed to watch for sosreports:", state.error);
+                self.problem = state.error.message ?? state.error.problem;
+                emit_changed();
+                return;
+            }
+            const entries = state.info?.entries;
+            const reports = { };
+            for (const name in entries) {
+                if (entries[name].type == "reg") {
+                    const report = parse_report_name(name, entries[name].mtime);
+                    if (report)
+                        reports[report_dir + '/' + name] = report;
+                }
+            }
+            self.reports = reports;
+            self.ready = true;
+            emit_changed();
         });
 
-        update_reports();
+        fsinfo.on("close", ex => {
+            self.problem = ex.problem;
+            self.ready = true;
+            emit_changed();
+        });
     }
 
     restart();
@@ -150,7 +153,7 @@ function sosCreate(args, setProgress, setError, setErrorDetail) {
 
     // TODO - Use a real API instead of scraping stdout once such an API exists
     const task = cockpit.spawn(["sos", "report", "--batch"].concat(args),
-                               { superuser: true, err: "out", pty: true });
+                               { superuser: "require", err: "out", pty: true });
 
     task.stream(text => {
         let p = 0;
@@ -190,12 +193,13 @@ function sosCreate(args, setProgress, setError, setErrorDetail) {
 }
 
 function sosDownload(path) {
-    const basename = path.replace(/.*\//, "");
+    const basename = path_basename(path);
     const query = window.btoa(JSON.stringify({
+        host: cockpit.transport.host,
         payload: "fsread1",
         binary: "raw",
         path,
-        superuser: true,
+        superuser: "require",
         max_read_size: 150 * 1024 * 1024,
         external: {
             "content-disposition": 'attachment; filename="' + basename + '"',
@@ -222,7 +226,16 @@ function sosDownload(path) {
 }
 
 function sosRemove(path) {
-    return cockpit.script(cockpit.format("rm -f '$0' '$0'.*", path), { superuser: true, err: "message" });
+    // there are various potential extra files; not all of them are expected to exist,
+    // the file API tolerates removing nonexisting files
+    const paths = [
+        path,
+        path + ".asc",
+        path + ".gpg",
+        path + ".md5",
+        path + ".sha256",
+    ];
+    return Promise.all(paths.map(p => cockpit.file(p, { superuser: "require" }).replace(null)));
 }
 
 const SOSDialog = () => {
@@ -439,7 +452,7 @@ const SOSBody = () => {
                 {_("Encrypted")}
             </Label>);
         if (report.obfuscated)
-            labels.push(<Label key="obf" color="gray">
+            labels.push(<Label key="obf" color="grey">
                 {_("Obfuscated")}
             </Label>);
 
@@ -464,7 +477,7 @@ const SOSBody = () => {
             props: { key: path },
             columns: [
                 report.name,
-                timeformat.distanceToNow(new Date(report.date * 1000), true),
+                timeformat.distanceToNow(new Date(report.date * 1000)),
                 { title: <LabelGroup>{labels}</LabelGroup> },
                 {
                     title: <>{action}{menu}</>,

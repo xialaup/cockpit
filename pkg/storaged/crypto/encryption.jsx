@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -25,7 +25,7 @@ import { DescriptionList } from "@patternfly/react-core/dist/esm/components/Desc
 import { CardBody } from "@patternfly/react-core/dist/esm/components/Card/index.js";
 import { useObject, useEvent } from "hooks";
 import * as python from "python.js";
-import * as timeformat from "timeformat.js";
+import * as timeformat from "timeformat";
 
 import { dialog_open, TextInput, PassInput } from "../dialog.jsx";
 import { block_name, encode_filename, decode_filename, parse_options, unparse_options, extract_option, edit_crypto_config } from "../utils.js";
@@ -60,7 +60,7 @@ function monitor_luks(block) {
     cockpit.event_target(self);
 
     const dev = decode_filename(block.Device);
-    const channel = python.spawn(luksmeta_monitor_hack_py, [dev], { superuser: true });
+    const channel = python.spawn(luksmeta_monitor_hack_py, [dev], { superuser: "require" });
     let buf = "";
 
     channel.stream(output => {
@@ -114,7 +114,7 @@ function monitor_mtime(path) {
 
     let file = null;
     if (path) {
-        file = cockpit.file(path, { superuser: true });
+        file = cockpit.file(path, { superuser: "require" });
         file.watch((_, tag) => { self.mtime = parse_tag_mtime(tag); self.dispatchEvent("changed") },
                    { read: false });
     }

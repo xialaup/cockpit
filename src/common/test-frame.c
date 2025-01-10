@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -122,6 +122,8 @@ test_valid (Fixture *pipe, const TestCase *tc)
       g_assert_cmpint (size, ==, i);
       for (gint j = 0; j < size; j++)
         g_assert (output[j] == ' ');
+      /* ensure it's NUL terminated */
+      g_assert (output[size] == '\0');
 
       /* Make sure our pattern is there */
       char buffer[7];

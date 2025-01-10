@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -26,7 +26,7 @@ import { CardBody } from "@patternfly/react-core/dist/esm/components/Card/index.
 import { DescriptionList } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
 
 import { StorageCard, StorageDescription, new_card, register_crossref } from "../pages.jsx";
-import { format_dialog } from "../block/format-dialog.jsx";
+import { std_format_action } from "../block/actions.jsx";
 import { std_lock_action } from "../crypto/actions.jsx";
 import { StorageUsageBar } from "../storage-controls.jsx";
 
@@ -47,7 +47,7 @@ export function make_lvm2_physical_volume_card(next, backing_block, content_bloc
         props: { backing_block, content_block },
         actions: [
             std_lock_action(backing_block, content_block),
-            { title: _("Format"), action: () => format_dialog(client, backing_block.path), danger: true },
+            std_format_action(backing_block, content_block),
         ]
     });
 

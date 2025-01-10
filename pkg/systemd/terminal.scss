@@ -5,7 +5,7 @@
 .console-ct-container {
   block-size: 100%;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   overflow: hidden;
 }
 
@@ -70,7 +70,6 @@
         min-inline-size: 5rem;
       }
     }
-    padding: 0;
   }
 }
 

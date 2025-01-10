@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_WEB_SERVER_H__
@@ -34,9 +34,6 @@ cockpit_web_request_get_type (void);
 
 CockpitWebResponse *
 cockpit_web_request_respond (CockpitWebRequest *self);
-
-const gchar *
-cockpit_web_request_get_original_path (CockpitWebRequest *self);
 
 const gchar *
 cockpit_web_request_get_path (CockpitWebRequest *self);
@@ -79,10 +76,6 @@ cockpit_web_request_get_remote_address (CockpitWebRequest *self);
 const gchar *
 cockpit_web_request_get_client_certificate (CockpitWebRequest *self);
 
-gboolean
-cockpit_web_request_accepts_encoding (CockpitWebRequest *self,
-                                      const gchar *encoding);
-
 #define COCKPIT_TYPE_WEB_SERVER  (cockpit_web_server_get_type ())
 G_DECLARE_FINAL_TYPE(CockpitWebServer, cockpit_web_server, COCKPIT, WEB_SERVER, GObject)
 
@@ -122,9 +115,6 @@ gboolean
 cockpit_web_server_add_fd_listener (CockpitWebServer *self,
                                     int fd,
                                     GError **error);
-
-GIOStream *
-cockpit_web_server_connect (CockpitWebServer *self);
 
 void
 cockpit_web_server_set_protocol_header (CockpitWebServer *self,

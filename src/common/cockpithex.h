@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_HEX_H__
@@ -24,9 +24,5 @@
 
 char *          cockpit_hex_encode            (const void *data,
                                                ssize_t length);
-
-void *          cockpit_hex_decode            (const char *hex,
-                                               ssize_t hexlen,
-                                               size_t *length);
 
 #endif

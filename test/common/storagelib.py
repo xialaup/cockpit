@@ -13,7 +13,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import json
 import os.path
@@ -131,13 +131,20 @@ class StorageHelpers:
 
         self.addCleanup(self.machine.execute, f"if [ -d /dev/{vgname} ]; then vgremove --force {vgname}; fi")
 
+    def addCleanupMount(self, mount_point):
+        self.addCleanup(self.machine.execute,
+                        f"if mountpoint -q {mount_point}; then umount {mount_point}; fi")
+
     # Dialogs
 
     def dialog_wait_open(self):
         self.browser.wait_visible('#dialog')
 
-    def dialog_wait_alert(self, text):
-        self.browser.wait_in_text('#dialog .pf-v5-c-alert__title', text)
+    def dialog_wait_alert(self, text1, text2=None):
+        def has_alert_title():
+            t = self.browser.text('#dialog .pf-v5-c-alert__title')
+            return text1 in t or (text2 is not None and text2 in t)
+        self.browser.wait(has_alert_title)
 
     def dialog_wait_title(self, text):
         self.browser.wait_in_text('#dialog .pf-v5-c-modal-box__title', text)
@@ -183,8 +190,8 @@ class StorageHelpers:
                 self.browser.set_checked(sel + " input[type=checkbox]", val=True)
                 self.browser.set_input_text(sel + " [type=text]", val)
         elif ftype == "combobox":
-            self.browser.click(sel + " button.pf-v5-c-select__toggle-button")
-            self.browser.click(sel + f" .pf-v5-c-select__menu li:contains('{val}') button")
+            self.browser.click(sel + " button.pf-v5-c-menu-toggle__button")
+            self.browser.click(sel + f" .pf-v5-c-menu li:contains('{val}') button")
         else:
             self.browser.set_val(sel, val)
 
@@ -211,6 +218,8 @@ class StorageHelpers:
             self.browser.wait_val(sel + " .size-text input", str(val))
         elif ftype == "select":
             self.browser.wait_attr(sel, "data-value", val)
+        elif ftype == "checkbox":
+            self.browser.wait_visible(sel + (":checked" if val else ":not(:checked)"))
         else:
             self.browser.wait_val(sel, val)
 
@@ -238,7 +247,7 @@ class StorageHelpers:
 
     def dialog_wait_close(self):
         # file system operations often take longer than 10s
-        with self.browser.wait_timeout(max(self.browser.cdp.timeout, 60)):
+        with self.browser.wait_timeout(max(self.browser.timeout, 60)):
             self.browser.wait_not_present('#dialog')
 
     def dialog_check(self, expect):
@@ -533,6 +542,12 @@ mount {dev}1 /new-root/boot
 tar --selinux --one-file-system -cf - --exclude /boot --exclude='/var/tmp/*' --exclude='/var/cache/*' \
     --exclude='/var/lib/mock/*' --exclude='/var/lib/containers/*' --exclude='/new-root/*' \
     / | tar --selinux -C /new-root -xf -
+# latest Fedora have /var on a separate subvolume
+if mountpoint /var; then
+    tar -C /var --selinux --one-file-system -cf - --exclude='tmp/*' --exclude='cache/*' \
+        --exclude='lib/mock/*' --exclude='lib/containers/*' \
+        . | tar --selinux -C /new-root/var -xf -
+fi
 tar --one-file-system -C /boot -cf - . | tar -C /new-root/boot -xf -
 umount /new-root/boot
 mount {dev}1 /boot
@@ -554,8 +569,9 @@ grub2-install {dev}
 grubby --update-kernel=ALL --args="root=UUID=$uuid rootflags=defaults rd.luks.uuid=$luks_uuid rd.lvm.lv=root/root"
 ! test -f /etc/kernel/cmdline || cp /etc/kernel/cmdline /new-root/etc/kernel/cmdline
 """, timeout=300)
-        m.spawn("dd if=/dev/zero of=/dev/vda bs=1M count=100; reboot", "reboot", check=False)
-        m.wait_reboot(300)
+        # destroy bootability of the current root partition, just to make sure
+        m.execute("rm -rf /etc/*")
+        m.reboot()
         self.assertEqual(m.execute("findmnt -n -o SOURCE /").strip(), "/dev/mapper/root-root")
 
     # Cards and tables
@@ -638,13 +654,13 @@ class StorageCase(MachineCase, StorageHelpers):
 
     def setUp(self):
 
-        if self.image in ["fedora-coreos", "rhel4edge"]:
+        if self.image == "fedora-coreos":
             self.skipTest("No udisks/cockpit-storaged on OSTree images")
 
         super().setUp()
 
         ver = self.machine.execute("busctl --system get-property org.freedesktop.UDisks2 /org/freedesktop/UDisks2/Manager org.freedesktop.UDisks2.Manager Version || true")
-        m = re.match('s "(.*)"', ver)
+        m = re.match(r's "(.*)"', ver)
         if m:
             self.storaged_version = list(map(int, m.group(1).split(".")))
         else:
@@ -656,7 +672,7 @@ class StorageCase(MachineCase, StorageHelpers):
         else:
             self.default_crypto_type = "luks1"
 
-        if self.image.startswith("rhel-8") or self.image.startswith("centos-8"):
+        if self.image.startswith("rhel-8"):
             # HACK: missing /etc/crypttab file upsets udisks: https://github.com/storaged-project/udisks/pull/835
             self.machine.write("/etc/crypttab", "")
 

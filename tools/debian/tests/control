@@ -1,4 +1,6 @@
 Tests: smoke
 Depends: cockpit,
          curl,
-Restrictions: isolation-container
+         adduser,
+Restrictions: isolation-container,
+              needs-sudo,

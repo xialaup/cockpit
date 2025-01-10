@@ -16,7 +16,7 @@
   Lesser General Public License for more details.
 
   You should have received a copy of the GNU Lesser General Public License
-  along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+  along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
   -->
 
   <refentryinfo>
@@ -108,7 +108,8 @@ ForwardedForHeader = X-Forwarded-For
             on the login screen is visible and allows logging into another server. When set to
             <literal>false</literal>, direct remote logins are disallowed. If this option is not specified
             then it will be automatically detected based on whether the
-            <command>cockpit-ssh</command> process is available or not.</para>
+            <command>cockpit-bridge</command> package is installed and the <command>ssh</command>
+            program is available.</para>
 
           <para>If cockpit-ws is exposed to the public internet, and also has access to a private
             internal network, it is recommended to explicitly set <literal>LoginTo=false</literal>. This prevents
@@ -121,6 +122,23 @@ ForwardedForHeader = X-Forwarded-For
         <listitem>
           <para>When set to <literal>true</literal> cockpit will require users to use the
             <emphasis>Connect to</emphasis> option to specify the host to log into.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>AllowMultiHost</option></term>
+        <listitem>
+          <para>
+            When set to <literal>true</literal>, cockpit will allow
+            users to connect to multiple hosts in one session. The
+            default is OS specific.
+          </para>
+          <para>
+            When connecting to multiple servers, JavaScript runs
+            without isolation. All systems will be vulnerable to
+            potential attacks from other connected hosts. Enable this
+            option <emphasis>only</emphasis> when all hosts are
+            trusted.
+          </para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -252,6 +270,18 @@ IdleTimeout=15
 </programlisting>
           </informalexample>
           <para>When not specified, there is no idle timeout by default.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>WarnBeforeConnecting</option></term>
+        <listitem>
+          <para>Whether to warn before connecting to remote hosts from the Shell. Defaults to true.</para>
+          <informalexample>
+<programlisting language="ini">
+[Session]
+WarnBeforeConnecting=false
+</programlisting>
+          </informalexample>
         </listitem>
       </varlistentry>
     </variablelist>

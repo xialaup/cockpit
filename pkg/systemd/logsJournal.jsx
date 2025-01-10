@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -225,7 +225,7 @@ export class JournalBox extends React.Component {
                 .then(entries => {
                     entries.split("\n").forEach(entry => {
                         if (entry)
-                            currentServices.add(entry.substr(entry.indexOf('=') + 1));
+                            currentServices.add(entry.substring(entry.indexOf('=') + 1));
                     });
                 })
                 .catch(e => {
@@ -276,10 +276,11 @@ export class JournalBox extends React.Component {
                     {error}
                     <EmptyStatePanel action={_("Clear all filters")}
                                      icon={ExclamationCircleIcon}
+                                     actionVariant="link"
                                      onAction={() => cockpit.location.go('/')}
                                      paragraph={_("Can not find any logs using the current combination of filters.")}
                                      title={_("No logs found")}
-                                     loading={false} />
+                    />
                 </div>
             );
         }
@@ -287,7 +288,6 @@ export class JournalBox extends React.Component {
             /* Show 'Load earlier entries' button if we didn't reach start yet */
             this.state.didntReachStart
                 ? <EmptyStatePanel action={_("Load earlier entries")}
-                             actionInProgressText={_("Loading earlier entries")}
                              icon={noLogs ? ExclamationCircleIcon : undefined}
                              isActionInProgress={this.state.loading}
                              onAction={() => {
@@ -322,7 +322,7 @@ export class JournalBox extends React.Component {
                              }}
                              paragraph={noLogs ? _("You may try to load older entries.") : ""}
                              title={noLogs ? _("No logs found") : ""}
-                             loading={false} />
+                             loading={this.state.loading} />
                 : null
         );
 

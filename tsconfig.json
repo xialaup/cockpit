@@ -1,0 +1,37 @@
+/*
+ * Config for `tsc` and `tsserver`, currently only used for typechecking.
+
+ * Our main build is via `esbuild` which can handle `.ts`, but doesn't do any
+ * checking on its own.  To typecheck, run `tsc`.
+ *
+ * Extended JSON — comments and trailing commas are good here.
+ */
+
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "checkJs": true,
+        "baseUrl": "./pkg/lib",
+        "esModuleInterop": true,
+        "exactOptionalPropertyTypes": true,
+        "incremental": true,
+        "jsx": "react",
+        "lib": [
+            "dom",
+            "es2021"
+        ],
+        "moduleResolution": "node",
+        "noEmit": true,  // we only use `tsc` for type checking
+        "strict": true,
+        "target": "es2021",
+    },
+    "include": [
+        "pkg/**/*"
+    ],
+    "exclude": [
+        // these are part of the build system, not the app
+        "pkg/lib/esbuild-*.js",
+        "pkg/lib/cockpit-*-plugin.js",
+        "pkg/lib/*2po.js"
+    ],
+}

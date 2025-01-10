@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -33,7 +33,7 @@ const _ = cockpit.gettext;
  * property of job objects.  These are from the storaged
  * documentation at
  *
- * http://storaged.org/doc/udisks2-api/latest/gdbus-org.freedesktop.UDisks2.Job.html
+ * https://storaged.org/doc/udisks2-api/latest/gdbus-org.freedesktop.UDisks2.Job.html
  */
 
 const descriptions = {

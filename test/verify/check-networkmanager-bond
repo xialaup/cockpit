@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import netlib
 import testlib
@@ -23,7 +23,6 @@ from lib.constants import TEST_OS_DEFAULT
 
 
 @testlib.nondestructive
-@testlib.skipDistroPackage()
 class TestBonding(netlib.NetworkCase):
     def testBasic(self):
         b = self.browser
@@ -45,7 +44,7 @@ class TestBonding(netlib.NetworkCase):
         b.wait_visible("#network-bond-settings-dialog")
         # wait until dialog initialized
         b.wait_visible("#network-bond-settings-dialog button[aria-label=Close]")
-        b.wait_visible("#network-bond-settings-mac-input-select-typeahead")
+        b.wait_visible("#network-bond-settings-mac-input")
         # menu is not visible by default, but gets initialized dynamically
         b.assert_pixels("#network-bond-settings-dialog", "networking-bond-settings-dialog",
                         # help icon gets rendered with unstable noise
@@ -213,7 +212,7 @@ class TestBonding(netlib.NetworkCase):
         b.wait_visible("#network-bond-settings-dialog")
         b.set_input_text("#network-bond-settings-interface-name-input", "tbond")
         b.set_checked(f"input[data-iface='{iface}']", val=True)
-        b.click("#network-bond-settings-mac-input")
+        b.click("#network-bond-settings-mac-input input")
         b.click("li button:contains('(cockpit1)')")
         b.click("#network-bond-settings-dialog button:contains('Add')")
         b.wait_not_present("#network-bond-settings-dialog")
@@ -260,11 +259,10 @@ class TestBonding(netlib.NetworkCase):
         b.wait_visible(f"#network-interface-members tr[data-interface='{iface}']")
 
 
-@testlib.skipDistroPackage()
 class TestBondingVirt(netlib.NetworkCase):
     provision = {
         "machine1": {"address": "10.111.113.1/20", "memory_mb": 512},
-        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True, "memory_mb": 256}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True, "memory_mb": 512}
     }
 
     @testlib.skipImage("Main interface can't be managed", "debian-*", "ubuntu-*")
@@ -297,7 +295,7 @@ class TestBondingVirt(netlib.NetworkCase):
         b.wait_not_present("#networking-interfaces tr[data-interface='tbond']")
         b.wait_visible(f"#networking-interfaces tr[data-interface='{iface}']")
 
-    @testlib.skipImage("TODO: no dhclient on Arch image", "arch")
+    @testlib.skipImage("no dhclient on OS image", "arch", "centos-10*", "rhel-10*")
     @testlib.skipImage("Main interface can't be managed", "debian-*", "ubuntu-*")
     @testlib.skipOstree("not using dhclient")
     def testSlowly(self):

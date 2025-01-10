@@ -23,6 +23,7 @@ RELEASES_XML = f'{FLATPAK_ID}.releases.xml'
 
 # Constants related to extra packages
 UPSTREAM_REPOS = [
+    'cockpit-project/cockpit-files',
     'cockpit-project/cockpit-machines',
     'cockpit-project/cockpit-ostree',
     'cockpit-project/cockpit-podman',
@@ -85,9 +86,8 @@ def create_manifest(
     return {
         'app-id': FLATPAK_ID,
         'runtime': 'org.gnome.Platform',
-        'runtime-version': '45',
+        'runtime-version': '47',
         'sdk': 'org.gnome.Sdk',
-        'default-branch': branch,
         'command': 'cockpit-client',
         'rename-icon': 'cockpit-client',
         'finish-args': [
@@ -103,9 +103,6 @@ def create_manifest(
                 'buildsystem': 'autotools',
                 'config-opts': [
                     '--enable-cockpit-client',
-                    '--disable-polkit',
-                    '--disable-ssh',
-                    '--disable-pcp',
                     '--with-systemdunitdir=/invalid',
                     'CPPFLAGS=-Itools/mock-build-env',
                     '--with-admin-group=root',

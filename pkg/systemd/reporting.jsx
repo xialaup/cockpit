@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -122,7 +122,7 @@ const FAFWorkflowRow = ({ problem }) => {
         const process = cockpit.spawn(["reporter-ureport", "-d", problem.ID],
                                       {
                                           err: "out",
-                                          superuser: "true",
+                                          superuser: "require",
                                       })
                 .stream((data) => setMessage(data))
                 .then(() => setProblemState(ProblemState.REPORTED))
@@ -312,7 +312,7 @@ const BusWorkflowRow = ({ problem, client, workflow }) => {
                         /* GLib encodes errors for transport over the wire,
                          * but we don’t have a good way of decoding them without calling into GIO.
                          *
-                         * https://developer-old.gnome.org/gio/stable/gio-GDBusError.html#g-dbus-error-encode-gerror
+                         * https://docs.gtk.org/gio/type_func.DBusError.encode_gerror.html
                          *
                          * 19 is G_IO_ERROR_CANCELLED. No need to handle user cancellations.
                          */
