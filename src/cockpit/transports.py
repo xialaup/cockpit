@@ -33,11 +33,11 @@ from typing import Any, ClassVar, Sequence
 
 from .jsonutil import JsonObject, get_int
 
-libc6 = ctypes.cdll.LoadLibrary('libc.so.6')
+sys_prctl = ctypes.CDLL(None).prctl
 
 
 def prctl(*args: int) -> None:
-    if libc6.prctl(*args) != 0:
+    if sys_prctl(*args) != 0:
         raise OSError('prctl() failed')
 
 
@@ -142,7 +142,7 @@ class _Transport(asyncio.Transport):
         self._closing = True
         self._close_reader()
         self._remove_write_queue()
-        self._protocol.connection_lost(exc)
+        self._loop.call_soon(self._protocol.connection_lost, exc)
         self._close()
 
     def can_write_eof(self) -> bool:

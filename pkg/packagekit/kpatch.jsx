@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import React from "react";
@@ -153,7 +153,7 @@ export class KpatchSettings extends React.Component {
                                 })
                             );
                 })
-                .catch(err => console.error("Could not determine kpatch packages:", err)); // not-covered: OS error
+                .catch(err => console.error("Could not determine kpatch packages:", JSON.stringify(err))); // not-covered: OS error
 
         return Promise.allSettled([kpatch_promise, uname_promise]);
     }

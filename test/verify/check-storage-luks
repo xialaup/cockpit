@@ -15,8 +15,9 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
+import json
 import subprocess
 
 import packagelib
@@ -32,6 +33,7 @@ def console_screenshot(machine, name):
 
 
 @testlib.nondestructive
+@testlib.skipImage("cryptsetup uses too much memory, OOM on our test VMs", "rhel-8-*")
 class TestStorageLuks(storagelib.StorageCase):
 
     def testLuks(self):
@@ -166,6 +168,20 @@ class TestStorageLuks(storagelib.StorageCase):
         self.assert_in_configuration(dev, "crypttab", "options", "readonly")
         self.assert_in_configuration(cleartext_dev, "fstab", "opts", "ro")
 
+        # Check that the clear text device is actually readonly
+        self.assertEqual(m.execute(f"lsblk -no RO {cleartext_dev}").strip(), "1")
+
+        # Change "read only" mount option. This should reopen LUKS as
+        # necessary and ask for a passphrase.
+        b.click(self.card_desc("ext4 filesystem", "Mount point") + " button")
+        self.dialog_wait_open()
+        self.dialog_set_val("mount_options.ro", val=False)
+        self.dialog_set_val("passphrase", "vainu-reku-toma-rolle-kaja")
+        self.dialog_apply()
+        self.dialog_wait_close()
+
+        self.assertEqual(m.execute(f"lsblk -no RO {cleartext_dev}").strip(), "0")
+
         # Delete the partition.
         self.click_card_dropdown("Partition", "Delete")
         self.confirm()
@@ -186,6 +202,54 @@ class TestStorageLuks(storagelib.StorageCase):
         # FIXME: race condition after unmounting; hard to investigate, re-check after storage redesign
         self.allow_browser_errors("validateDOMNesting.*cannot appear as a child.*<tr> ul")
 
+    def testFormatReadOnly(self):
+        m = self.machine
+        b = self.browser
+
+        self.login_and_go("/storage")
+
+        disk = self.add_ram_disk(400)
+        self.click_card_row("Storage", name=disk)
+
+        # Create a encrypted filesystem and mount it readonly. This
+        # needs to reopen the LUKS layer after formatting.
+
+        self.click_card_dropdown("Unformatted data", "Format")
+        self.dialog({"type": "ext4",
+                     "mount_point": "/run/foo",
+                     "mount_options.ro": True,
+                     "crypto": "luks1",
+                     "passphrase": "vainu-reku-toma-rolle-kaja",
+                     "passphrase2": "vainu-reku-toma-rolle-kaja"})
+        b.wait_visible(self.card("ext4 filesystem"))
+
+        uuid = m.execute(f"cryptsetup luksUUID {disk}").strip()
+        cleartext_dev = "/dev/mapper/luks-" + uuid
+
+        self.assert_in_configuration(disk, "crypttab", "options", "readonly")
+        self.assert_in_configuration(cleartext_dev, "fstab", "opts", "ro")
+        self.assertEqual(m.execute(f"lsblk -no RO {cleartext_dev}").strip(), "1")
+
+        # Reformat it, while keeping the encryption layer and keeping
+        # it read-only.  This needs to reopen LUKS twice, once to make
+        # the cleartext device writable for formatting, and once to
+        # make it read-only again, as requested.
+
+        self.click_card_dropdown("ext4 filesystem", "Format")
+        self.dialog_wait_open()
+        self.dialog_wait_val("mount_point", "/run/foo")
+        self.dialog_wait_val("type", "ext4")
+        self.dialog_wait_val("crypto", " keep")
+        self.dialog_wait_val("crypto_options", "")
+        b.wait_visible(self.dialog_field("mount_options.ro") + ":checked")
+        self.dialog_set_val("type", "xfs")
+        self.dialog_set_val("old_passphrase", "vainu-reku-toma-rolle-kaja")
+        self.dialog_apply()
+        self.dialog_wait_close()
+        b.wait_visible(self.card("xfs filesystem"))
+
+        self.assertEqual(m.execute(f"lsblk -no RO {cleartext_dev}").strip(), "1")
+
     def testNoFsys(self):
         m = self.machine
         b = self.browser
@@ -205,6 +269,7 @@ class TestStorageLuks(storagelib.StorageCase):
 
         # Lock it
         b.click(self.card_button("Unformatted data", "Lock"))
+        self.confirm()
         b.wait_visible(self.card("Locked data"))
 
         # Make it readonly
@@ -223,12 +288,10 @@ class TestStorageLuks(storagelib.StorageCase):
         b.click(self.card_button("Locked data", "Unlock"))
         self.dialog({"passphrase": "vainu-reku-toma-rolle-kaja"})
 
-        # Try to format it, just for kicks
-        self.click_card_dropdown("Unformatted data", "Format")
-        self.dialog({"type": "ext4",
-                     "mount_point": "/run/foo"})
-        b.wait_visible(self.card("ext4 filesystem"))
-        self.wait_mounted("ext4 filesystem")
+        # Should be unlocked readonly
+        uuid = m.execute(f"cryptsetup luksUUID {disk}").strip()
+        cleartext_dev = "/dev/mapper/luks-" + uuid
+        self.assertEqual(m.execute(f"lsblk -no RO {cleartext_dev}").strip(), "1")
 
         # Now create a empty, encrypted partition
         self.click_card_dropdown("Solid State Drive", "Create partition table")
@@ -459,7 +522,7 @@ class TestStorageLuksDestructive(storagelib.StorageCase):
         self.wait_mounted("ext4 filesystem")
 
         self.setup_systemd_password_agent("vainu-reku-toma-rolle-kaja")
-        m.reboot()
+        self.reboot()
         m.start_cockpit()
         b.relogin()
         b.enter_page("/storage")
@@ -548,6 +611,24 @@ class TestStorageNBDE(storagelib.StorageCase, packagelib.PackageCase):
         self.dialog_wait_close()
         self.wait_mounted("ext4 filesystem")
 
+        # LUKS should be read/write
+        uuid = m.execute(f"cryptsetup luksUUID {dev}").strip()
+        cleartext_dev = "/dev/mapper/luks-" + uuid
+        self.assertEqual(m.execute(f"lsblk -no RO {cleartext_dev}").strip(), "0")
+
+        # Remount "readonly", LUKS should be readonly
+        b.click(self.card_button("ext4 filesystem", "Unmount"))
+        self.confirm()
+        b.click(self.card_button("Filesystem", "Mount"))
+        self.dialog_wait_open()
+        self.dialog_set_val("mount_options.ro", val=True)
+        self.dialog_apply()
+        self.dialog_wait_close()
+        self.wait_mounted("ext4 filesystem")
+
+        # Now LUKS should be readonly
+        self.assertEqual(m.execute(f"lsblk -no RO {cleartext_dev}").strip(), "1")
+
         # Edit the key, without providing an existing passphrase
         #
         b.click(panel + "ul li:nth-child(2) [aria-label='Edit']")
@@ -625,7 +706,7 @@ class TestStorageNBDE(storagelib.StorageCase, packagelib.PackageCase):
 
         # Reboot
         #
-        m.reboot()
+        self.reboot()
         m.start_cockpit()
         b.relogin()
         b.enter_page("/storage")
@@ -639,6 +720,8 @@ class TestStorageNBDE(storagelib.StorageCase, packagelib.PackageCase):
         b.wait_not_present(panel + 'ul li:contains("Slot 1")')
 
     @testlib.skipImage("TODO: don't know how to encrypt the rootfs", "debian-*", "ubuntu-*", "arch")
+    # this doesn't work in ostree either, but we don't run storage tests there
+    @testlib.skipWsContainer("newly built root doesn't contain ws container")
     @testlib.timeout(1200)
     def testRootReboot(self):
         m = self.machine
@@ -696,11 +779,12 @@ class TestStorageNBDE(storagelib.StorageCase, packagelib.PackageCase):
 
         # Tell the initrd to configure our special inter-machine
         # network that has the "tang" machine.
-        #
-        m.execute("grubby --update-kernel=ALL --args='ip=10.111.112.1::10.111.112.1:255.255.255.0::eth1:off'")
+        routes = json.loads(m.execute("ip --json route show 10.111.112.0/20"))
+        iface = routes[0]["dev"]
+        m.execute(f"grubby --update-kernel=ALL --args='ip=10.111.112.1::10.111.112.1:255.255.255.0::{iface}:off'")
 
         try:
-            m.reboot(timeout_sec=300)
+            self.reboot(timeout_sec=300)
         except Exception:
             console_screenshot(m, "failed-reboot.ppm")
             raise

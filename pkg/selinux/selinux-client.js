@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from 'cockpit';
@@ -232,5 +232,5 @@ ${rules}
 // returns a promise of the command used to set enforcing mode
 export function setEnforcing(enforcingMode) {
     const command = ["setenforce", (enforcingMode ? "1" : "0")];
-    return cockpit.spawn(command, { superuser: true, err: "message" });
+    return cockpit.spawn(command, { superuser: "require", err: "message" });
 }

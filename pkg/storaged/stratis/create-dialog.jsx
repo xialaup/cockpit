@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -61,14 +61,12 @@ export function create_stratis_pool() {
                              },
                              spaces: get_available_spaces(client)
                          }),
-            CheckBoxes("encrypt_pass", client.features.stratis_crypto_binding ? _("Options") : "",
+            CheckBoxes("encrypt_pass", _("Options"),
                        {
                            fields: [
                                {
                                    tag: "on",
-                                   title: (client.features.stratis_crypto_binding
-                                       ? _("Encrypt data with a passphrase")
-                                       : _("Encrypt data"))
+                                   title: _("Encrypt data with a passphrase"),
                                }
                            ],
                            nested_fields: [
@@ -94,7 +92,6 @@ export function create_stratis_pool() {
                        }),
             CheckBoxes("encrypt_tang", "",
                        {
-                           visible: () => client.features.stratis_crypto_binding,
                            fields: [
                                { tag: "on", title: _("Encrypt data with a Tang keyserver") }
                            ],
@@ -106,14 +103,13 @@ export function create_stratis_pool() {
                                          }),
                            ]
                        }),
-            CheckBoxes("managed", "",
+            CheckBoxes("overprov", "",
                        {
-                           visible: () => client.features.stratis_managed_fsys_sizes,
+                           value: { on: true },
                            fields: [
                                {
                                    tag: "on",
-                                   title: _("Manage filesystem sizes"),
-                                   tooltip: _("When this option is checked, the new pool will not allow overprovisioning. You need to specify a maximum size for each filesystem that is created in the pool. Filesystems can not be made larger after creation. Snapshots are fully allocated on creation. The sum of all maximum sizes can not exceed the size of the pool. The advantage of this is that filesystems in this pool can not run out of space in a surprising way. The disadvantage is that you need to know the maximum size for each filesystem in advance and creation of snapshots is limited.")
+                                   title: _("Overprovisioning"),
                                }
                            ]
                        })
@@ -128,14 +124,19 @@ export function create_stratis_pool() {
                         let clevis_info = null;
                         if (adv)
                             clevis_info = ["tang", JSON.stringify({ url: vals.tang_url, adv })];
-                        return client.stratis_create_pool(vals.name, devs, key_desc, clevis_info)
+                        return client.stratis_manager.CreatePool(vals.name,
+                                                                 devs,
+                                                                 key_desc ? [true, key_desc] : [false, ""],
+                                                                 clevis_info ? [true, clevis_info] : [false, ["", ""]])
                                 .then(std_reply)
                                 .then(result => {
-                                    if (vals.managed && vals.managed.on && result[0]) {
+                                    if (vals.overprov && !vals.overprov.on && result[0]) {
                                         const path = result[1][0];
                                         return client.wait_for(() => client.stratis_pools[path])
                                                 .then(pool => {
-                                                    return client.stratis_set_overprovisioning(pool, false);
+                                                    return client.stratis_set_property(pool,
+                                                                                       "Overprovisioning",
+                                                                                       "b", false);
                                                 });
                                     }
                                 });

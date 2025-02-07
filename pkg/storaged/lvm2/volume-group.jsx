@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -24,8 +24,6 @@ import client from "../client";
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { CardHeader, CardBody } from "@patternfly/react-core/dist/esm/components/Card/index.js";
 import { DescriptionList } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
-
-import { useObject } from "hooks";
 
 import { VolumeIcon } from "../icons/gnome-icons.jsx";
 import { StorageButton, StorageLink } from "../storage-controls.jsx";
@@ -44,7 +42,7 @@ import {
 import {
     dialog_open, SelectSpaces, TextInput,
     BlockingMessage, TeardownMessage,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 
 import { create_logical_volume } from "./create-logical-volume-dialog.jsx";
@@ -104,7 +102,7 @@ function vgroup_delete(client, vgroup, card) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage)
+            init_teardown_usage(client, usage)
         ]
     });
 }
@@ -273,23 +271,6 @@ export function make_lvm2_volume_group_page(parent, vgroup) {
     make_logical_volume_pages(vgroup_page, vgroup);
 }
 
-function vgroup_poller(vgroup) {
-    let timer = null;
-
-    if (vgroup.NeedsPolling) {
-        timer = window.setInterval(() => { vgroup.Poll() }, 2000);
-    }
-
-    function stop() {
-        if (timer)
-            window.clearInterval(timer);
-    }
-
-    return {
-        stop
-    };
-}
-
 const LVM2LogicalVolumesCard = ({ card, vgroup }) => {
     return (
         <StorageCard card={card}>
@@ -304,10 +285,6 @@ const LVM2LogicalVolumesCard = ({ card, vgroup }) => {
 
 const LVM2VolumeGroupCard = ({ card, vgroup }) => {
     const has_missing_pvs = vgroup.MissingPhysicalVolumes && vgroup.MissingPhysicalVolumes.length > 0;
-
-    useObject(() => vgroup_poller(vgroup),
-              poller => poller.stop(),
-              [vgroup]);
 
     function is_partial_linear_lvol(block) {
         const lvm2 = client.blocks_lvm2[block.path];
@@ -328,8 +305,10 @@ const LVM2VolumeGroupCard = ({ card, vgroup }) => {
            a bit inconsistent, but *shrug*.
         */
 
-        let usage = get_active_usage(client, vgroup.path, _("delete"));
-        usage = usage.filter(u => u.block && is_partial_linear_lvol(u.block));
+        const all_usage = get_active_usage(client, vgroup.path, _("delete"));
+        const usage = all_usage.filter(u => u.block && is_partial_linear_lvol(u.block));
+        usage.Blocking = all_usage.Blocking;
+        usage.Teardown = all_usage.Teardown;
 
         if (usage.Blocking) {
             dialog_open({
@@ -359,7 +338,7 @@ const LVM2VolumeGroupCard = ({ card, vgroup }) => {
                 }
             },
             Inits: [
-                init_active_usage_processes(client, usage)
+                init_teardown_usage(client, usage)
             ]
         });
     }

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -47,7 +47,7 @@ export function make_iscsi_session_page(parent, session) {
         page_location: ["iscsi", session.data.target_name],
         page_name: session.data.target_name,
         page_icon: NetworkIcon,
-        page_categroy: PAGE_CATEGORY_NETWORK,
+        page_category: PAGE_CATEGORY_NETWORK,
         component: ISCSISessionCard,
         props: { session },
         actions: [

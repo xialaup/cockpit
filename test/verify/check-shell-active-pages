@@ -15,12 +15,11 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import testlib
 
 
-@testlib.skipDistroPackage()
 @testlib.nondestructive
 class TestActivePages(testlib.MachineCase):
     def testBasic(self):
@@ -69,7 +68,7 @@ class TestActivePages(testlib.MachineCase):
         b.wait_in_text(line_sel(1), '$')
 
         # run a command that we can easily identify, and which will die with the terminal
-        b.key_press("bash -c 'exec -a kitten cat'\r")
+        b.input_text("bash -c 'exec -a kitten cat'\n")
 
         # wait for command to run
         m.execute("until pgrep -afx kitten; do sleep 1; done")

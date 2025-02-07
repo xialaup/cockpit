@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 # This module can convert profile data from CDP to LCOV, produce a
 # HTML report, and post review comments.
@@ -32,7 +32,9 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from bisect import bisect_left
+from typing import Any, Mapping, Sequence
 
 from task import github
 
@@ -91,7 +93,7 @@ def parse_sourcemap(f, line_starts, dir_name):
 
     our_sources = set()
     for s in sources:
-        if "node_modules" not in s and (s.endswith(('.js', '.jsx'))):
+        if "node_modules" not in s and (s.endswith(('.js', '.jsx', '.ts', '.tsx'))):
             our_sources.add(s)
 
     dst_col, src_id, src_line = 0, 0, 0
@@ -158,6 +160,12 @@ def get_dist_map(package):
 
 
 def get_distfile(url, dist_map):
+    path = urllib.parse.urlparse(url).path
+    if path.startswith('/qunit/'):
+        relpath = path[1:]
+        if os.path.exists(relpath) and os.path.exists(f'{relpath}.map'):
+            return DistFile(path[1:])
+
     parts = url.split("/")
     if len(parts) < 3 or "cockpit" not in parts:
         return None
@@ -287,12 +295,12 @@ def print_diff_coverage(path, file_hits, out):
     out.write("end_of_record\n")
 
 
-def write_lcov(covdata, outlabel):
+def write_lcov(covdata: Sequence[Mapping[str, str]], outlabel: str) -> None:
 
     with open(f"{BASE_DIR}/package.json") as f:
         package = json.load(f)
     dist_map = get_dist_map(package)
-    file_hits = {}
+    file_hits: Any = {}
 
     def covranges(functions):
         for f in functions:
@@ -370,7 +378,7 @@ def write_lcov(covdata, outlabel):
         if distfile:
             ranges = sorted(covranges(script['functions']),
                             key=lambda r: r['endOffset'] - r['startOffset'], reverse=True)
-            hits = {}
+            hits: Any = {}
             for r in ranges:
                 record_range(hits, r, distfile)
             merge_hits(file_hits, hits)
@@ -398,7 +406,7 @@ def get_review_comments(diff_info_file):
         # Don't complain about lines that contain only punctuation, or
         # nothing but "else".  We don't seem to get reliable
         # information for them.
-        if not re.search('[a-zA-Z0-9]', text.replace("else", "")):
+        if not re.search(r'[a-zA-Z0-9]', text.replace("else", "")):
             return False
         return True
 
@@ -459,7 +467,7 @@ def prepare_for_code_coverage():
         subprocess.check_call(["git", "-c", "diff.noprefix=false", "diff", "--patience", branch], stdout=f)
 
 
-def create_coverage_report():
+def create_coverage_report() -> None:
     output = os.environ.get("TEST_ATTACHMENTS", BASE_DIR)
     lcov_files = glob.glob(f"{BASE_DIR}/lcov/*.info.gz")
     try:
@@ -471,7 +479,7 @@ def create_coverage_report():
         diff_file = f"{BASE_DIR}/lcov/diff.info"
         excludes = []
         # Exclude pkg/lib in Cockpit projects such as podman/machines.
-        if title != "cockpit.git":
+        if title != "cockpit.git" and title != "cockpit":
             excludes = ["--exclude", "pkg/lib"]
         subprocess.check_call(["lcov", "--quiet", "--output", all_file, *excludes,
                                *itertools.chain(*[["--add", f] for f in lcov_files])])

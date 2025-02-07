@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -131,7 +131,7 @@ class SELinuxEventDetails extends React.Component {
                 lines.forEach(l => {
                     if (l[0] == "#") { // command
                         if (lastCommand) // When appending command remove "# ". Only the first command keeps it and it is removed later on
-                            parts[parts.length - 1] += ("\n" + l.substr(2));
+                            parts[parts.length - 1] += ("\n" + l.substring(2));
                         else
                             parts.push(l);
                         lastCommand = true;
@@ -144,7 +144,7 @@ class SELinuxEventDetails extends React.Component {
                     ? <TextArea aria-label={_("solution")}
                                 readOnlyVariant="plain"
                                 key={p}
-                                defaultValue={p.substr(2)} />
+                                defaultValue={p.substring(2)} />
                     : <span key={p}>{p}</span>);
             }
 
@@ -260,7 +260,6 @@ class SELinuxStatus extends React.Component {
                     <h2>{_("SELinux policy")}</h2>
                     <Switch isChecked={this.props.selinuxStatus.enforcing}
                             label={_("Enforcing")}
-                            labelOff={_("Permissive")}
                             onChange={this.props.changeSelinuxMode} />
                 </Flex>
                 { note !== null &&

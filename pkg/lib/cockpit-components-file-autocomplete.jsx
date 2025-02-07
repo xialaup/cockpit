@@ -14,14 +14,14 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
 import React from "react";
-import { Select, SelectOption } from "@patternfly/react-core/dist/esm/deprecated/components/Select/index.js";
 import PropTypes from "prop-types";
 import { debounce } from 'throttle-debounce';
+import { TypeaheadSelect } from "cockpit-components-typeahead-select";
 
 const _ = cockpit.gettext;
 
@@ -31,25 +31,17 @@ export class FileAutoComplete extends React.Component {
         this.state = {
             directory: '', // The current directory we list files/dirs from
             displayFiles: [],
-            isOpen: false,
             value: this.props.value || null,
         };
 
-        this.typeaheadInputValue = "";
         this.allowFilesUpdate = true;
-        this.updateFiles = this.updateFiles.bind(this);
-        this.finishUpdate = this.finishUpdate.bind(this);
-        this.onToggle = this.onToggle.bind(this);
         this.clearSelection = this.clearSelection.bind(this);
-        this.onCreateOption = this.onCreateOption.bind(this);
 
         this.onPathChange = (value) => {
             if (!value) {
                 this.clearSelection();
                 return;
             }
-
-            this.typeaheadInputValue = value;
 
             const cb = (dirPath) => this.updateFiles(dirPath == '' ? '/' : dirPath);
 
@@ -89,12 +81,6 @@ export class FileAutoComplete extends React.Component {
         this.allowFilesUpdate = false;
     }
 
-    onCreateOption(newValue) {
-        this.setState(prevState => ({
-            displayFiles: [...prevState.displayFiles, { type: "file", path: newValue }]
-        }));
-    }
-
     updateFiles(path) {
         if (this.state.directory == path)
             return;
@@ -117,7 +103,8 @@ export class FileAutoComplete extends React.Component {
 
         channel.addEventListener("message", (ev, data) => {
             const item = JSON.parse(data);
-            if (item && item.path && item.event == 'present') {
+            if (item && item.path && item.event == 'present' &&
+                (!this.props.onlyDirectories || item.type == 'directory')) {
                 item.path = item.path + (item.type == 'directory' ? '/' : '');
                 results.push(item);
             }
@@ -151,17 +138,9 @@ export class FileAutoComplete extends React.Component {
         });
     }
 
-    onToggle(_, isOpen) {
-        this.setState({ isOpen });
-    }
-
     clearSelection() {
-        this.typeaheadInputValue = "";
         this.updateFiles("/");
-        this.setState({
-            value: null,
-            isOpen: false
-        });
+        this.setState({ value: null });
         this.props.onChange('', null);
     }
 
@@ -169,32 +148,34 @@ export class FileAutoComplete extends React.Component {
         const placeholder = this.props.placeholder || _("Path to file");
 
         const selectOptions = this.state.displayFiles
-                .map(option => <SelectOption key={option.path}
-                                             className={option.type}
-                                             value={option.path} />);
+                .map(option => ({ value: option.path, content: option.path, className: option.type }));
+
         return (
-            <Select
-                variant="typeahead"
-                id={this.props.id}
-                isInputValuePersisted
-                onTypeaheadInputChanged={this.debouncedChange}
-                placeholderText={placeholder}
-                noResultsFoundText={this.state.error || _("No such file or directory")}
-                selections={this.state.value}
-                onSelect={(_, value) => {
-                    this.setState({ value, isOpen: false });
-                    this.debouncedChange(value);
-                    this.props.onChange(value || '', null);
-                }}
-                onToggle={this.onToggle}
-                onClear={this.clearSelection}
-                isOpen={this.state.isOpen}
-                isCreatable={this.props.isOptionCreatable}
-                createText={_("Create")}
-                onCreateOption={this.onCreateOption}
-                menuAppendTo="parent">
-                {selectOptions}
-            </Select>
+            <TypeaheadSelect toggleProps={ { id: this.props.id } }
+                             isScrollable
+                             onInputChange={this.debouncedChange}
+                             placeholder={placeholder}
+                             noOptionsAvailableMessage={this.state.error || _("No such file or directory")}
+                             noOptionsFoundMessage={this.state.error || _("No such file or directory")}
+                             onToggle={isOpen => {
+                                 // Try to list again when
+                                 // opening. Calling onPathChange here
+                                 // usually does nothing, except when
+                                 // there was an error earlier.
+                                 if (isOpen)
+                                     this.onPathChange(this.state.value);
+                             }}
+                             selected={this.state.value}
+                             selectedIsTrusted
+                             onSelect={(_, value) => {
+                                 this.setState({ value });
+                                 this.onPathChange(value);
+                                 this.props.onChange(value || '', null);
+                             }}
+                             onClearSelection={this.clearSelection}
+                             isCreatable={this.props.isOptionCreatable}
+                             createOptionMessage={val => cockpit.format(_("Create $0"), val)}
+                             selectOptions={selectOptions} />
         );
     }
 }
@@ -203,10 +184,12 @@ FileAutoComplete.propTypes = {
     placeholder: PropTypes.string,
     superuser: PropTypes.string,
     isOptionCreatable: PropTypes.bool,
+    onlyDirectories: PropTypes.bool,
     onChange: PropTypes.func,
     value: PropTypes.string,
 };
 FileAutoComplete.defaultProps = {
     isOptionCreatable: false,
+    onlyDirectories: false,
     onChange: () => '',
 };

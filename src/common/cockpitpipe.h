@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_PIPE_H__
@@ -88,8 +88,6 @@ GByteArray *       cockpit_pipe_get_buffer   (CockpitPipe *self);
 GByteArray *       cockpit_pipe_get_stderr   (CockpitPipe *self);
 
 gchar *            cockpit_pipe_take_stderr_as_utf8 (CockpitPipe *self);
-
-void               cockpit_pipe_stop_stderr_capture (CockpitPipe *self);
 
 gboolean           cockpit_pipe_get_pid      (CockpitPipe *self,
                                               GPid *pid);

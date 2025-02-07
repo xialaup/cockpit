@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+trap 'if [ "$?" -ne 0 ]; then id cockpit-ws || true; systemctl --all | grep cockpit; sudo journalctl -b; fi' EXIT
+
 check_out() {
     echo "$OUT" | grep -q "$1" || {
         echo "output does not match '$1'" >&2

@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 import time
 
 import packagelib
@@ -23,7 +23,7 @@ import testlib
 
 
 @testlib.skipImage("TODO: bug in refreshing removed/installed state on Arch Linux", "arch")
-@testlib.skipOstree("Not supported")
+@testlib.skipWsContainer("Not supported")
 @testlib.nondestructive
 class TestApps(packagelib.PackageCase):
 
@@ -34,17 +34,17 @@ class TestApps(packagelib.PackageCase):
 
     def createAppStreamPackage(self, name, version, revision, install=False):
         self.createPackage(name, version, revision, content={
-            f"/usr/share/metainfo/org.cockpit-project.{name}.metainfo.xml": f"""
+            f"/usr/share/metainfo/org.cockpit_project.{name}.metainfo.xml": f"""
 <component type="addon">
   <extends>org.cockpit_project.cockpit</extends>
   <id>org.cockpit-project.{name}</id>
-  <icon type="local">/usr/share/pixmaps/{name}.png</icon>
+  <icon type="stock">{name}</icon>
   <name>{name}</name>
   <summary>{name} application for testing</summary>
   <launchable type="cockpit-manifest">{name}</launchable>
 </component>
 """,
-            f"/usr/share/pixmaps/{name}.png": {"path": "/var/tmp/test.png"}}, install=install)
+            f"/usr/share/icons/hicolor/64x64/apps/{name}.png": {"path": "/var/tmp/test.png"}}, install=install)
         self.appstream_collection.add(name)
 
     def createAppStreamRepoPackage(self, subdir=None):
@@ -243,10 +243,11 @@ class TestApps(packagelib.PackageCase):
         def set_lang(lang):
             b.switch_to_top()
             b.open_session_menu()
-            b.click(".display-language-menu")
+            b.click("button.display-language-menu")
             b.wait_visible('#display-language-modal')
             b.click(f'#display-language-modal li[data-value={lang}] button')
             b.click("#display-language-modal footer button.pf-m-primary")
+            b.wait_not_present('#display-language-modal')
             b.wait_language(lang)
             b.enter_page("/apps")
 
@@ -389,6 +390,20 @@ This <is <not XML.
 </components>""")
         b.wait_not_present(".pf-v5-c-empty-state")
         b.wait_visible(".app-list .pf-v5-c-data-list__item-row:contains('Summary 2')")
+
+    def testNoPackageKit(self):
+        b = self.browser
+        m = self.machine
+
+        m.execute("systemctl stop packagekit")
+        system_service = m.execute("systemctl show -p FragmentPath packagekit.service | cut -f2 -d=").strip()
+        m.execute(f"mv {system_service} {system_service}.disabled")
+        self.addCleanup(m.execute, f"mv {system_service}.disabled {system_service}")
+
+        self.assertNotIn("\napps", m.execute("cockpit-bridge --packages"))
+        self.login_and_go(None)
+        b.wait_in_text("#host-apps", "Terminal")
+        self.assertNotIn("Applications", b.text("#host-apps"))
 
 
 if __name__ == '__main__':

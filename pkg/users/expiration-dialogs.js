@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from 'cockpit';
@@ -27,7 +27,7 @@ import { DatePicker } from "@patternfly/react-core/dist/esm/components/DatePicke
 
 import { has_errors } from "./dialog-utils.js";
 import { show_modal_dialog, apply_modal_dialog } from "cockpit-components-dialog.jsx";
-import * as timeformat from "timeformat.js";
+import * as timeformat from "timeformat";
 import { FormHelper } from "cockpit-components-form-helper";
 
 const _ = cockpit.gettext;
@@ -73,7 +73,7 @@ export function account_expiration_dialog(account, expire_date) {
     const state = {
         mode: expire_date ? "expires" : "never",
         before: parts,
-        date: expire_date?.toISOString().substr(0, 10) ?? ""
+        date: expire_date?.toISOString().substring(0, 10) ?? ""
     };
 
     let errors = { };
@@ -119,11 +119,11 @@ export function account_expiration_dialog(account, expire_date) {
                             const prog = ["/usr/sbin/usermod", "-e"];
                             if (state.mode == "expires") {
                                 const date = new Date(state.date + "T12:00:00Z");
-                                prog.push(date.toISOString().substr(0, 10));
+                                prog.push(date.toISOString().substring(0, 10));
                             } else
                                 prog.push("");
                             prog.push(account.name);
-                            return cockpit.spawn(prog, { superuser: true, err: "message" });
+                            return cockpit.spawn(prog, { superuser: "require", err: "message" });
                         } else {
                             update();
                             return Promise.reject();
@@ -220,7 +220,7 @@ export function password_expiration_dialog(account, expire_days) {
                         if (validate()) {
                             const days = state.mode == "expires" ? parseInt(state.days) : 99999;
                             return cockpit.spawn(["passwd", "-x", String(days), account.name],
-                                                 { superuser: true, err: "message" });
+                                                 { superuser: "require", err: "message" });
                         } else {
                             update();
                             return Promise.reject();

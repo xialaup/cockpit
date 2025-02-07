@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -287,7 +287,7 @@ export class AbrtLogDetails extends React.Component {
                 </GalleryItem>
                 <GalleryItem id="abrt-details">
                     <Card>
-                        <CardHeader actions={{ actions: <><Button variant="danger" onClick={this.onDelete}>{_("Delete")}</Button></> }}>
+                        <CardHeader actions={{ actions: <Button variant="danger" onClick={this.onDelete}>{_("Delete")}</Button> }}>
 
                             <CardTitle component="h2">{_("Extended information")}</CardTitle>
                         </CardHeader>

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -43,8 +43,8 @@
 #define SOCKET_ACTIVATION_HELPER BUILDDIR "/socket-activation-helper"
 #define COCKPIT_WS BUILDDIR "/cockpit-ws"
 /* this has a corresponding mock-server.key */
-#define CERTFILE SRCDIR "/src/bridge/mock-server.crt"
-#define KEYFILE SRCDIR "/src/bridge/mock-server.key"
+#define CERTFILE SRCDIR "/test/data/mock-server.crt"
+#define KEYFILE SRCDIR "/test/data/mock-server.key"
 
 #define CLIENT_CERTFILE SRCDIR "/src/tls/ca/alice.pem"
 #define CLIENT_KEYFILE SRCDIR "/src/tls/ca/alice.key"

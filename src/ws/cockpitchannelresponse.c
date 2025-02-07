@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -22,6 +22,7 @@
 #include "cockpitchannelresponse.h"
 
 #include "common/cockpitchannel.h"
+#include "common/cockpitconf.h"
 #include "common/cockpitflow.h"
 #include "common/cockpitwebinject.h"
 #include "common/cockpitwebserver.h"
@@ -102,6 +103,13 @@ cockpit_channel_inject_perform (CockpitChannelInject *inject,
     {
       prefixed_application = g_strdup_printf ("/%s", cockpit_creds_get_application (creds));
     }
+
+  {
+    const gboolean allow_multihost = cockpit_conf_bool ("WebService", "AllowMultiHost",
+                                                        ALLOW_MULTIHOST_DEFAULT);
+    g_string_append_printf (str, "\n    <meta name=\"allow-multihost\" content=\"%s\">",
+                            allow_multihost ? "yes" : "no");
+  }
 
   if (inject->base_path)
     {
@@ -593,6 +601,7 @@ cockpit_channel_response_serve (CockpitWebService *service,
   gchar *channel = NULL;
   gpointer key;
   gpointer value;
+  gboolean allow_multihost;
 
   g_return_if_fail (COCKPIT_IS_WEB_SERVICE (service));
   g_return_if_fail (in_headers != NULL);
@@ -603,6 +612,14 @@ cockpit_channel_response_serve (CockpitWebService *service,
   if (!parse_host_and_etag (service, in_headers, where, path, &host, &quoted_etag))
     {
       /* Did not recognize the where */
+      goto out;
+    }
+
+  allow_multihost = cockpit_conf_bool ("WebService", "AllowMultiHost", ALLOW_MULTIHOST_DEFAULT);
+  if (!allow_multihost && g_strcmp0 (host, "localhost") != 0)
+    {
+      cockpit_web_response_error (response, 403, NULL, NULL);
+      handled = TRUE;
       goto out;
     }
 

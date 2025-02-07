@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 import cockpit from "cockpit";
 import { journal } from "journal";
@@ -55,14 +55,14 @@ export const getGrepFiltersFromOptions = ({ options }) => {
         options.service.split(",").forEach(s => {
             if (!s.endsWith(".service"))
                 s = s + ".service";
-            match.push(...['_SYSTEMD_UNIT=' + s, "+", "COREDUMP_UNIT=" + s, "+", "UNIT=" + s]);
+            match.push('_SYSTEMD_UNIT=' + s, "+", "COREDUMP_UNIT=" + s, "+", "UNIT=" + s);
         });
         full_grep += "service:" + options.service + " ";
     } else if (options["user-service"]) {
         options["user-service"].split(",").forEach(s => {
             if (!s.endsWith(".service"))
                 s = s + ".service";
-            match.push(...['_SYSTEMD_USER_UNIT=' + s, "+", "COREDUMP_USER_UNIT=" + s, "+", "USER_UNIT=" + s]);
+            match.push('_SYSTEMD_USER_UNIT=' + s, "+", "COREDUMP_USER_UNIT=" + s, "+", "USER_UNIT=" + s);
         });
         full_grep += "user-service:" + options["user-service"] + " ";
     }

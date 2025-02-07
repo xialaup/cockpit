@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 import React from 'react';
 import { Button } from "@patternfly/react-core/dist/esm/components/Button/index.js";
@@ -108,7 +108,8 @@ export class UsageCard extends React.Component {
 
         let used_text;
         if (this.state.memTotal) {
-            const [total_fmt, unit] = cockpit.format_bytes(this.state.memTotal, 1024, { separate: true, precision: 2 });
+            const [total_fmt, unit] = cockpit.format_bytes(this.state.memTotal, { base2: true, separate: true, precision: 2 });
+            // FIXME: passing explicit unit is deprecated, redesign this
             const used_fmt = cockpit.format_bytes(this.samples[3], unit, { separate: true, precision: 2 })[0];
             used_text = cockpit.format("$0 / $1 $2", used_fmt, total_fmt, unit);
         } else {

@@ -2,7 +2,7 @@ name: unit-tests
 on: [pull_request, workflow_dispatch]
 jobs:
   unit-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions: {}
     strategy:
       matrix:
@@ -21,7 +21,7 @@ jobs:
           set -eux
 
           IMAGE="$(curl --fail https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/.cockpit-ci/container)"
-          podman run --network=host --rm --interactive "${IMAGE}" sh -eux <<EOF
+          podman run --security-opt=seccomp=unconfined --network=host --rm --interactive "${IMAGE}" sh -eux <<EOF
             export FORCE_COLOR=1
             export TEST_BROWSER=firefox
             export CFLAGS=-O2
@@ -32,6 +32,7 @@ jobs:
             git reset --hard ${GITHUB_SHA}
 
             vendor/checkout
-            ./autogen.sh
+            test/common/make-bots
+            ./autogen.sh --enable-strict
             make -j$(nproc) '${{ matrix.target }}'
           EOF

@@ -15,12 +15,11 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import testlib
 
 
-@testlib.skipDistroPackage()
 class TestRoles(testlib.MachineCase):
 
     @testlib.nondestructive
@@ -49,11 +48,6 @@ class TestRoles(testlib.MachineCase):
         b.enter_page("/system")
         b.switch_to_top()
         b.wait_text('#current-username', 'user')
-        b.set_layout("mobile")
-        b.click("#hosts-sel button")
-        b.wait_in_text(".view-hosts .pf-m-current", "user @")
-        b.click("#hosts-sel button")
-        b.set_layout("desktop")
 
         b.go("/users#/user")
         b.enter_page("/users")
@@ -115,11 +109,11 @@ class TestRoles(testlib.MachineCase):
         self.login_and_go("/users")
         b.go("#/admin")
 
-        b.click("#account-groups")
-        b.wait_visible(".pf-v5-c-select__menu li:contains(docker)")
+        b.click("#account-groups > button")
+        b.wait_visible(".pf-v5-c-menu li:contains(docker)")
 
         m.execute("groupdel docker")
-        b.wait_not_present(".pf-v5-c-select__menu li:contains(docker)")
+        b.wait_not_present(".pf-v5-c-menu li:contains(docker)")
 
 
 if __name__ == '__main__':

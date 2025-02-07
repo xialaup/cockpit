@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import time
 
@@ -48,7 +48,6 @@ def get_active_rules(machine):
 
 @testlib.skipOstree("no firewalld")
 @testlib.nondestructive
-@testlib.skipDistroPackage()
 class TestFirewall(netlib.NetworkCase):
     def setUp(self):
         super().setUp()
@@ -71,10 +70,11 @@ class TestFirewall(netlib.NetworkCase):
         def get_num_zones():
             return int(m.execute("firewall-cmd --get-active-zones | grep --count '^[a-zA-Z]'").strip())
 
+        self.login_and_go("/network", superuser=False)
+
         active_zones = get_num_zones()
 
         # Zones should be visible as unprivileged user
-        self.login_and_go("/network", superuser=False)
         self.wait_onoff("#networking-firewall-summary", val=True)
         wait_unit_state(m, "firewalld", "active")
         b.wait_in_text("#networking-firewall-summary", f"{active_zones} active zone")
@@ -86,6 +86,7 @@ class TestFirewall(netlib.NetworkCase):
         self.wait_onoff("#networking-firewall-summary", val=True)
         wait_unit_state(m, "firewalld", "active")
 
+        active_zones = get_num_zones()
         b.wait_in_text("#networking-firewall-summary", f"{active_zones} active zone")
 
         self.toggle_onoff("#networking-firewall-summary")
@@ -337,8 +338,7 @@ class TestFirewall(netlib.NetworkCase):
         m.execute("firewall-cmd --add-service=pop3")
         b.wait_visible(".zone-section[data-id='public'] tr[data-row-id='pop3']")
         b.wait_visible(".zone-section[data-id='public'] td:contains('Additional ports') + td:contains('9998')")
-        # remove service via cli and cockpit
-        m.execute("firewall-cmd --remove-service=pop3")
+        # remove service in cockpit
         b.click(".zone-section[data-id='public'] tr[data-row-id='pop3'] button.pf-v5-c-menu-toggle")
         b.click(".zone-section[data-id='public'] .pf-v5-c-menu__list-item.pf-m-danger button")
         b.wait_not_present(".zone-section[data-id='public'] tr[data-row-id='pop3']")

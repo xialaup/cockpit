@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import time
 
@@ -48,16 +48,15 @@ mv -f ~/.ssh/authorized_keys.test-avc ~/.ssh/authorized_keys
 """
 
 
-@testlib.skipDistroPackage()
 class TestSelinux(testlib.MachineCase):
     provision = {
         "0": {},
-        "ansible_machine": {"image": TEST_OS_DEFAULT, "memory_mb": 512}
+        "ansible_machine": {"image": TEST_OS_DEFAULT, "memory_mb": 650}
     }
 
     @testlib.skipImage("No setroubleshoot", "debian-*", "ubuntu-*", "arch")
     @testlib.skipOstree("No setroubleshoot")
-    @testlib.skipBrowser("Firefox needs http to access clipboard", "firefox")
+    @testlib.skipBrowser("Firefox fails to recognize 'clipboard-read' permission", "firefox")
     def testTroubleshootAlerts(self):
         b = self.browser
         m = self.machine
@@ -208,11 +207,7 @@ class TestSelinux(testlib.MachineCase):
         b.click(dismiss_sel)
         b.wait_not_present(row_selector)
 
-        try:
-            b.grant_permissions("clipboardReadWrite", "clipboardSanitizedWrite")
-        except RuntimeError:
-            # fallback for older Chrome releases
-            b.grant_permissions("clipboardRead", "clipboardWrite")
+        b.grant_permissions("clipboard-read", "clipboard-write")
 
         b.wait_visible(".pf-v5-c-data-list__cell:contains(Allow zebra)")
         b.wait_visible(".pf-v5-c-data-list__cell:contains(fcontext -a -f a -t samba_share_t -r 's0' '/var/tmp/')")
@@ -231,7 +226,11 @@ class TestSelinux(testlib.MachineCase):
             # See https://github.com/SELinuxProject/selinux/commit/3a9b4505b
             # Combining of versions < 3.0 with versions >= 3.0 provides a bit
             # different outputs.
-            return script.replace("permissive -D\n", "")
+            script = script.replace("permissive -D\n", "")
+            # likewise, this only started to exist in Fedora 40
+            if not m.image.startswith('fedora-4'):
+                script = script.replace("boolean -m -1 selinuxuser_execmod\n", "")
+            return script
 
         b.click("button:contains('Ansible')")
         b.wait_text_matches(ansible_script_sel, "Allow zebra.*write.*config")
@@ -269,7 +268,7 @@ class TestSelinux(testlib.MachineCase):
         b.go("/system/terminal")
         b.enter_page("/system/terminal")
         b.focus('.terminal')
-        b.key_press("\"\r")
+        b.input_text('"\n')
         # Right click and paste
         b.mouse(".terminal", "contextmenu", btn=2)
         b.click('.contextMenu li:nth-child(2) button')
@@ -293,7 +292,6 @@ class TestSelinux(testlib.MachineCase):
         b.wait_text("ul[aria-label='System modifications']", "The logged in user is not permitted to view system modifications")
 
 
-@testlib.skipDistroPackage()
 @testlib.skipImage("No cockpit-selinux", "debian-*", "ubuntu-*", "arch")
 @testlib.skipOstree("No cockpit-selinux")
 @testlib.nondestructive
@@ -304,6 +302,10 @@ class TestSelinuxEnforcing(testlib.MachineCase):
 
         self.login_and_go("/selinux")
 
+        # https://bugzilla.redhat.com/show_bug.cgi?id=2293652
+        if self.machine.image == "fedora-40":
+            self.allow_browser_errors('Warning: Encountered two children with the same key.*')
+
         #########################################################
         # wait for the page to be present
         b.wait_in_text("body", "SELinux policy")
@@ -311,7 +313,7 @@ class TestSelinuxEnforcing(testlib.MachineCase):
         def assertEnforce(active):
             # polled every 10s
             with b.wait_timeout(20):
-                b.wait_visible(".pf-v5-c-switch__input" + (active and ":checked" or ":not(:checked)"))
+                b.wait_visible(".pf-v5-c-switch__input" + (":checked" if active else ":not(:checked)"))
 
         # SELinux should be enabled and enforcing at the beginning
         assertEnforce(active=True)

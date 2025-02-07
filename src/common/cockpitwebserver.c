@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -657,21 +657,6 @@ cockpit_web_server_start (CockpitWebServer *self)
   g_socket_service_start (self->socket_service);
 }
 
-GIOStream *
-cockpit_web_server_connect (CockpitWebServer *self)
-{
-  g_return_val_if_fail (COCKPIT_IS_WEB_SERVER (self), NULL);
-
-  g_autoptr(GIOStream) server = NULL;
-  g_autoptr(GIOStream) client = NULL;
-
-  cockpit_socket_streampair (&client, &server);
-
-  cockpit_web_request_start (self, server, TRUE);
-
-  return g_steal_pointer (&client);
-}
-
 /* ---------------------------------------------------------------------------------------------------- */
 
 void
@@ -1273,12 +1258,6 @@ cockpit_web_request_respond (CockpitWebRequest *self)
 }
 
 const gchar *
-cockpit_web_request_get_original_path (CockpitWebRequest *self)
-{
-  return self->original_path;
-}
-
-const gchar *
 cockpit_web_request_get_path (CockpitWebRequest *self)
 {
   return self->path;
@@ -1421,17 +1400,3 @@ cockpit_web_request_get_client_certificate (CockpitWebRequest *self)
   cockpit_json_get_string (metadata, "client-certificate", NULL, &client_certificate);
   return client_certificate;
 }
-
-gboolean
-cockpit_web_request_accepts_encoding (CockpitWebRequest *self,
-                                      const gchar *encoding)
-{
-  const gchar *accept = g_hash_table_lookup (self->headers, "Accept-Encoding");
-  if (!accept)
-    return TRUE;
-  g_auto(GStrv) encodings = cockpit_web_server_parse_accept_list (accept, NULL);
-  return g_strv_contains ((const gchar **) encodings, encoding) ||
-         g_strv_contains ((const gchar **) encodings, "*");
-}
-
-/* ---------------------------------------------------------------------------------------------------- */

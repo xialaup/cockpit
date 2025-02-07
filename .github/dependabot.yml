@@ -3,9 +3,9 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "daily"
-      # run these when most of our developers don't work, don't DoS our CI over the day
-      time: "22:00"
+      interval: "weekly"
+      # run these when most of our developers don't work
+      day: "sunday"
       timezone: "Europe/Berlin"
     open-pull-requests-limit: 3
     commit-message:
@@ -19,15 +19,34 @@ updates:
       esbuild:
         patterns:
           - "esbuild*"
-      stylelint:
-        patterns:
-          - "stylelint*"
-      xterm:
-        patterns:
-          - "xterm*"
       patternfly:
         patterns:
           - "@patternfly*"
+      react:
+        patterns:
+          - "react*"
+      stylelint:
+        patterns:
+          - "stylelint*"
+      types:
+        patterns:
+          - "@types*"
+          - "types*"
+      xterm:
+        patterns:
+          - "@xterm/*"
+    ignore:
+      # https://github.com/cockpit-project/cockpit/issues/21151
+      - dependency-name: "sass"
+        versions: ["1.x", "2.x"]
+
+      # lots of work, do this explicitly
+      - dependency-name: "@patternfly/*"
+        versions: ["6.x"]
+
+      # PF5 requires fixed major React version
+      - dependency-name: "*react*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

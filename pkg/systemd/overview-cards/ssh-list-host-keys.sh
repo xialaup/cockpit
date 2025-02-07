@@ -38,14 +38,14 @@ echo "$config" | while IFS='\n' read line; do
 done
 
 # Check with systemd
-systemd=$(systemctl show --property=Listen sshd.socket || true)
+systemd=$(systemctl show --property=Listen sshd.socket || systemctl show --property=Listen ssh.socket || true)
 echo "$systemd" | while IFS='=' read -r name value; do
     if [ "$name" = "ListenStream" ]; then
         parse_addr "$value"
     fi
 done
 
-keys=$(ssh-keyscan -t dsa,ecdsa,ed25519,rsa -p "$port" "$host" || true)
+keys=$(ssh-keyscan -t ecdsa,ed25519,rsa -p "$port" "$host" || true)
 if [ -n "$keys" ]; then
     # Some versions of ssh-keygen don't support -f reading from stdin
     # so write a tmpfile

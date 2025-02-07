@@ -223,7 +223,7 @@ export function proxy(name, kind) {
             refresh();
     }
 
-    /* HACK - https://bugs.freedesktop.org/show_bug.cgi?id=69575
+    /* HACK - https://github.com/systemd/systemd/issues/570#issuecomment-125334529
      *
      * We need to explicitly get new property values when getting
      * a UnitNew signal since UnitNew doesn't carry them.
@@ -290,9 +290,9 @@ export function proxy(name, kind) {
 
             call_manager(dbus, method, args)
                     .then(([path]) => { pending_job_path = path })
-                    .catch(() => {
+                    .catch(ex => {
                         dbus.close();
-                        reject();
+                        reject(ex);
                     });
         });
     }

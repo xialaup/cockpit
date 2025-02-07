@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -69,7 +69,7 @@ const _ = cockpit.gettext;
    other pages. For example, each row in the table in the overview
    page represents another page, and clicking on it will navigate to
    that page. (In fact, the overview table shows the whole tree. Other
-   apges show subsets of the tree in their tables.)
+   pages show subsets of the tree in their tables.)
 
    Most of the complications with pages and cards are there to support
    putting pages into tables. Without having to do that, we wouldn't
@@ -127,7 +127,7 @@ const _ = cockpit.gettext;
 
    When a page appears in such a crossref table, it has dedicated
    actions, a dedicated size, and generally looks different from when
-   it appears in a "normal" childrens table. This is another source of
+   it appears in a "normal" children's table. This is another source of
    complication of how cards and pages interact.
 */
 
@@ -587,7 +587,7 @@ export const PageTable = ({ emptyCaption, aria_label, pages, crossrefs, sorted, 
 
         if (narrow) {
             rows.push(
-                <Card key={key} onClick={onClick}
+                <Card key={key}
                       className={"ct-small-table-card" +
                                  (page.location ? " ct-clickable-card" : null) +
                                  (is_new ? " ct-new-item" : "")}
@@ -595,11 +595,13 @@ export const PageTable = ({ emptyCaption, aria_label, pages, crossrefs, sorted, 
                       data-test-row-location={page.columns[1]}>
                     <CardBody>
                         <Split hasGutter>
-                            { icon && <SplitItem>{icon}</SplitItem> }
-                            <SplitItem isFilled><strong><Truncate content={name} /></strong>{info}</SplitItem>
+                            { icon && <SplitItem onClick={onClick}>{icon}</SplitItem> }
+                            <SplitItem isFilled onClick={onClick}>
+                                <strong><Truncate content={name} /></strong>{info}
+                            </SplitItem>
                             <SplitItem>{actions}</SplitItem>
                         </Split>
-                        <Split hasGutter isWrappable>
+                        <Split hasGutter isWrappable onClick={onClick}>
                             <SplitItem>{type}</SplitItem>
                             <SplitItem isFilled>{location}</SplitItem>
                             <SplitItem isFilled className="pf-v5-u-text-align-right">{size}</SplitItem>
@@ -710,12 +712,12 @@ export const PageTable = ({ emptyCaption, aria_label, pages, crossrefs, sorted, 
                     { pages &&
                     <Thead>
                         <Tr>
-                            { show_icons && <Th /> }
+                            { show_icons && <Th aria-label={_("Category")} />}
                             <Th>{_("ID")}</Th>
                             <Th>{_("Type")}</Th>
                             <Th>{_("Location")}</Th>
                             <Th className="storage-size-column-header">{_("Size")}</Th>
-                            <Th />
+                            <Th aria-label={_("Actions")} />
                         </Tr>
                     </Thead>
                     }

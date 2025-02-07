@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -24,7 +24,7 @@ import {
     dialog_open,
     SelectOne, CheckBoxes,
     BlockingMessage, TeardownMessage,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 import { get_active_usage, block_name, teardown_active_usage, reload_systemd } from "../utils.js";
 import { job_progress_wrapper } from "../jobs-panel.jsx";
@@ -84,7 +84,7 @@ export function format_disk(block) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage)
+            init_teardown_usage(client, usage)
         ]
     });
 }

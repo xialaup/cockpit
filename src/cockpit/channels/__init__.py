@@ -17,9 +17,10 @@
 
 from .dbus import DBusChannel
 from .filesystem import FsInfoChannel, FsListChannel, FsReadChannel, FsReplaceChannel, FsWatchChannel
-from .http import HttpChannel
+from .http_channel import HttpChannel
 from .metrics import InternalMetricsChannel
 from .packages import PackagesChannel
+from .pcp import PcpMetricsChannel
 from .stream import SocketStreamChannel, SubprocessStreamChannel
 from .trivial import EchoChannel, NullChannel
 
@@ -35,6 +36,7 @@ CHANNEL_TYPES = [
     InternalMetricsChannel,
     NullChannel,
     PackagesChannel,
+    PcpMetricsChannel,
     SubprocessStreamChannel,
     SocketStreamChannel,
 ]

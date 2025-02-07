@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_TRANSPORT_H__
@@ -90,9 +90,6 @@ void        cockpit_transport_thaw           (CockpitTransport *transport,
                                               const gchar *channel);
 
 GBytes *    cockpit_transport_parse_frame    (GBytes *message,
-                                              gchar **channel);
-
-GBytes *    cockpit_transport_maybe_frame    (GBytes *message,
                                               gchar **channel);
 
 gboolean    cockpit_transport_parse_command  (GBytes *payload,

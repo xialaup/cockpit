@@ -79,47 +79,4 @@ QUnit.test("binary", function (assert) {
     channel.send(buffer);
 });
 
-QUnit.test("fence", async assert => {
-    const done = assert.async();
-
-    // This is implemented in the C bridge, but not in Python.
-    if (await QUnit.mock_info("pybridge")) {
-        assert.ok(true, "skipping on python bridge, not implemented");
-        done();
-        return;
-    }
-
-    assert.expect(2);
-
-    const before = cockpit.channel({ payload: "echo" });
-    before.addEventListener("message", onMessage);
-
-    const fence = cockpit.channel({ payload: "echo", group: "fence" });
-    fence.addEventListener("message", onMessage);
-
-    const after = cockpit.channel({ payload: "echo" });
-    after.addEventListener("message", onMessage);
-
-    const received = [];
-    function onMessage(ev, payload) {
-        received.push(payload);
-        if (received.length == 3) {
-            assert.deepEqual(received, ["1", "2", "3"], "got back before and fence data");
-            fence.close();
-        } else if (received.length == 5) {
-            assert.deepEqual(received, ["1", "2", "3", "4", "5"], "got back data in right order");
-            before.close();
-            after.close();
-            done();
-        }
-    }
-
-    /* We send messages in this order, but they should echoed in numeric order */
-    before.send("1");
-    after.send("4");
-    after.send("5");
-    fence.send("2");
-    fence.send("3");
-});
-
 QUnit.start();

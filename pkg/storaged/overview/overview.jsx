@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -113,7 +113,7 @@ const OverviewCard = ({ card, plot_state }) => {
         is_enabled: () => client.features.stratis,
         package: client.get_config("stratis_package", false),
         enable: () => {
-            return cockpit.spawn(["systemctl", "start", "stratisd"], { superuser: true })
+            return cockpit.spawn(["systemctl", "start", "stratisd"], { superuser: "require" })
                     .then(() => client.stratis_start());
         },
 

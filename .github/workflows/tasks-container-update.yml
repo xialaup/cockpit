@@ -1,18 +1,19 @@
 name: tasks-container-update
 on:
   schedule:
-    - cron: '0 2 * * 4'
+    - cron: '0 2 * * 1'
   # can be run manually on https://github.com/cockpit-project/cockpit/actions
   workflow_dispatch:
 jobs:
   tasks-container-update:
+    environment: self
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       statuses: write
     container:
-      image: quay.io/cockpit/tasks
+      image: ghcr.io/cockpit-project/tasks
       options: --user root
     steps:
       - name: Set up configuration and secrets
@@ -23,6 +24,8 @@ jobs:
 
       - name: Clone repository
         uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
 
       # https://github.blog/2022-04-12-git-security-vulnerability-announced/
       - name: Pacify git's permission check
@@ -30,5 +33,5 @@ jobs:
 
       - name: Run tasks-container-update
         run: |
-          make bots
+          test/common/make-bots
           bots/tasks-container-update

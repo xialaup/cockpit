@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -30,7 +30,7 @@ import { superuser } from "superuser.js";
 const _ = cockpit.gettext;
 
 export const SuperuserAlert = () => {
-    if (superuser.allowed)
+    if (superuser.allowed || !superuser.configured)
         return null;
 
     return <Alert className="ct-limited-access-alert"

@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import storagelib
 import testlib
@@ -52,7 +52,7 @@ mkpart logical ext2 24 48"""
         m.execute("udevadm settle")
         m.execute(f"mke2fs -q -L TEST {disk1}5")
 
-        b.inject_js("""
+        b.eval_js("""
           ph_texts = function (sel) {
             return ph_select(sel).map(function(e) { return e.textContent });
           }""")

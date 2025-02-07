@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -344,7 +344,6 @@ cockpit_transport_thaw (CockpitTransport *self,
 
 static GBytes *
 parse_frame (GBytes *message,
-             gboolean expect,
              gchar **channel)
 {
   const gchar *data;
@@ -358,16 +357,14 @@ parse_frame (GBytes *message,
   line = memchr (data, '\n', length);
   if (!line)
     {
-      if (expect)
-        g_message ("received invalid message without channel prefix");
+      g_message ("received invalid message without channel prefix");
       return NULL;
     }
 
   channel_len = line - data;
   if (memchr (data, '\0', channel_len) != NULL)
     {
-      if (expect)
-        g_message ("received massage with invalid channel prefix");
+      g_message ("received massage with invalid channel prefix");
       return NULL;
     }
 
@@ -397,14 +394,7 @@ GBytes *
 cockpit_transport_parse_frame (GBytes *message,
                                gchar **channel)
 {
-  return parse_frame (message, TRUE, channel);
-}
-
-GBytes *
-cockpit_transport_maybe_frame (GBytes *message,
-                               gchar **channel)
-{
-  return parse_frame (message, FALSE, channel);
+  return parse_frame (message, channel);
 }
 
 /**

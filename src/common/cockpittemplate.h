@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef COCKPIT_TEMPLATE_H__
@@ -27,12 +27,6 @@ typedef GBytes * (* CockpitTemplateFunc)          (const gchar *variable,
                                                    gpointer user_data);
 
 GList *           cockpit_template_expand         (GBytes *input,
-                                                   const gchar *start_marker,
-                                                   const gchar *end_marker,
-                                                   CockpitTemplateFunc func,
-                                                   gpointer user_data);
-
-JsonObject *      cockpit_template_expand_json    (JsonObject *object,
                                                    const gchar *start_marker,
                                                    const gchar *end_marker,
                                                    CockpitTemplateFunc func,

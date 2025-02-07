@@ -7,7 +7,6 @@
 # devel           - runs tests with coverage enabled and generates a html file
 #                   with coverage information and `NODE_ENV=development`
 #                   to get additional React checks and useful stack traces.
-# pybridge        - runs tests with the Python bridge
 # firefox         - runs tests using the Firefox browser instead of Chrome
 # networking      - networking related tests
 # storage         - storage related tests
@@ -25,23 +24,22 @@ PREPARE_OPTS=""
 RUN_OPTS=""
 ALL_TESTS="$(test/common/run-tests --test-dir test/verify -l)"
 
-RE_NETWORKING='Networking|Bonding|TestBridge|WireGuard|Firewall|Team|IPA|AD'
+RE_NETWORKING='Networking|Bonding|Connection|TestBridge|WireGuard|Firewall|Team|IPA|AD|Kerberos'
 RE_STORAGE='Storage'
 RE_EXPENSIVE='HostSwitching|MultiMachine|Updates|Superuser|Kdump|Pages'
 
 # every known case needs to set RUN_OPTS to something non-empty, so that we can check if we hit any branch
 case "${TEST_SCENARIO:=}" in
     *devel*) RUN_OPTS="$RUN_OPTS --coverage"; export NODE_ENV=development ;;&
-    *pybridge*) RUN_OPTS="$RUN_OPTS "; PREPARE_OPTS="$PREPARE_OPTS --python" ;;&
     *firefox*) RUN_OPTS="$RUN_OPTS "; export TEST_BROWSER=firefox ;;&
 
     *daily*)
-        bots/image-customize --fresh -v --run-command 'dnf -y copr enable rpmsoftwaremanagement/dnf-nightly && dnf -y copr enable @storage/udisks-daily && dnf -y --setopt=install_weak_deps=False update >&2' "$TEST_OS"
+        bots/image-customize --fresh -v --script test/vm.daily "$TEST_OS"
         RUN_OPTS="$RUN_OPTS "
         PREPARE_OPTS="$PREPARE_OPTS --overlay"
         ;;&
    *updates-testing*)
-        bots/image-customize --fresh -v --run-command 'dnf -y update --enablerepo=updates-testing --setopt=install_weak_deps=False >&2' "$TEST_OS"
+        bots/image-customize --fresh -v --script test/vm.updates-testing "$TEST_OS"
         RUN_OPTS="$RUN_OPTS "
         PREPARE_OPTS="$PREPARE_OPTS --overlay"
         ;;&
@@ -62,8 +60,17 @@ case "${TEST_SCENARIO:=}" in
     *other*)
         RUN_OPTS="$RUN_OPTS $(echo "$ALL_TESTS" | grep -Ev "$RE_NETWORKING|$RE_STORAGE|$RE_EXPENSIVE")"
         ;;&
+    *ws-container*)
+        PREPARE_OPTS="$PREPARE_OPTS --quick --container"
+        RUN_OPTS="$RUN_OPTS "
+        ;;&
 
 esac
+
+# these are too volatile/ungated, we can't keep up with reporting issues
+if [ "${TEST_OS#fedora}" != "$TEST_OS" ] || [ "$TEST_OS" = "centos-10" ]; then
+    export TEST_AUDIT_NO_SELINUX=1
+fi
 
 if [ -n "$TEST_SCENARIO" ] && [ -z "$RUN_OPTS" ]; then
     echo "Unknown test scenario: $TEST_SCENARIO"

@@ -15,18 +15,17 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import netlib
 import testlib
 from lib.constants import TEST_OS_DEFAULT
 
 
-@testlib.skipDistroPackage()
 class TestNetworkingSettings(netlib.NetworkCase):
     provision = {
         "machine1": {"memory_mb": 512},
-        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True, "memory_mb": 256}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True, "memory_mb": 512}
     }
 
     def testNoConnectionSettings(self):
@@ -129,7 +128,7 @@ class TestNetworkingSettings(netlib.NetworkCase):
 
         # Check that IPv4/IPv6 settings dialogs only show the supported IP methods for wireguard
         # Skip images without the wireguard-tools package
-        if m.image not in ["rhel4edge", "centos-8-stream"] and not m.image.startswith("rhel-8"):
+        if m.image not in ["centos-10"] and not m.image.startswith("rhel-8"):
             b.go("/network")
             b.click("#networking-add-wg")
             b.set_input_text("#network-wireguard-settings-addresses-input", "1.2.3.4/24")
