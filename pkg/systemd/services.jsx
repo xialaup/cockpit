@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import '../lib/patternfly/patternfly-5-cockpit.scss';
@@ -24,7 +24,6 @@ import 'cockpit-dark-theme'; // once per page
 import React, { useState, useEffect, useCallback } from "react";
 import { createRoot } from 'react-dom/client';
 import { Flex, FlexItem } from "@patternfly/react-core/dist/esm/layouts/Flex/index.js";
-import { Select, SelectOption } from "@patternfly/react-core/dist/esm/deprecated/components/Select/index.js";
 import { Page, PageSection, PageSectionVariants } from "@patternfly/react-core/dist/esm/components/Page/index.js";
 import { Card } from "@patternfly/react-core/dist/esm/components/Card/index.js";
 import { SearchInput } from "@patternfly/react-core/dist/esm/components/SearchInput/index.js";
@@ -32,6 +31,7 @@ import { ToggleGroup, ToggleGroupItem } from "@patternfly/react-core/dist/esm/co
 import { Toolbar, ToolbarContent, ToolbarFilter, ToolbarItem, ToolbarToggleGroup } from "@patternfly/react-core/dist/esm/components/Toolbar/index.js";
 import { ExclamationCircleIcon, FilterIcon } from '@patternfly/react-icons';
 
+import { CheckboxSelect } from "cockpit-components-checkbox-select";
 import { EmptyStatePanel } from "cockpit-components-empty-state.jsx";
 import { Service } from "./service.jsx";
 import { ServiceTabs, service_tabs_suffixes } from "./service-tabs.jsx";
@@ -239,7 +239,7 @@ class ServicesPageBody extends React.Component {
         };
 
         // Possible UnitFileState values: enabled, enabled-runtime, linked, linked-runtime, alias, masked, masked-runtime, static, disabled, invalid, indirect, generated, transient, bad
-        // See: typedef enum UnitFileState https://github.com/systemd/systemd/blob/main/src/basic/unit-file.h
+        // See: typedef enum UnitFileState https://github.com/systemd/systemd/blob/main/src/shared/unit-file.h
         this.unitFileState = {
             enabled: _("Enabled"),
             "enabled-runtime": _("Enabled"),
@@ -483,7 +483,7 @@ class ServicesPageBody extends React.Component {
                     const unit_files = {};
                     unitFilesResults.forEach(([UnitFilePath, UnitFileState]) => {
                         const Id = UnitFilePath.split('/').pop();
-                        if (!this.isUnitHandled(Id) | this.isTemplate(Id))
+                        if (!this.isUnitHandled(Id) || this.isTemplate(Id))
                             return;
 
                         this.seenUnitFileStates.add(UnitFileState);
@@ -585,7 +585,7 @@ class ServicesPageBody extends React.Component {
 
         Object.values(this.units).forEach(u => {
             if (u.ActiveState == "failed" && u.LoadState != "not-found") {
-                const suffix = u.Id.substr(u.Id.lastIndexOf('.') + 1);
+                const suffix = u.Id.substring(u.Id.lastIndexOf('.') + 1);
                 if (service_tabs_suffixes.includes(suffix)) {
                     tabErrors[suffix] = true;
                     failed.add(u.Id);
@@ -732,9 +732,7 @@ const ServicesPageFilters = ({
     onOptionsChanged,
 }) => {
     const { activestate, filestate, name } = options;
-    const [activeStateFilterIsOpen, setActiveStateFilterIsOpen] = useState(false);
     const [currentTextFilter, setCurrentTextFilter] = useState(decodeURIComponent(name || ""));
-    const [fileStateFilterIsOpen, setFileStateFilterIsOpen] = useState(false);
     const [filters, setFilters] = useState({
         activeState: JSON.parse(activestate || '[]'),
         fileState: JSON.parse(filestate || '[]'),
@@ -757,18 +755,16 @@ const ServicesPageFilters = ({
         onOptionsChanged(_options);
     }, [filters, currentTextFilter, onOptionsChanged]);
 
-    const onSelect = (type, event, selection) => {
-        const checked = event.target.checked;
-
+    const onSelect = (type, checked, selection) => {
         setFilters({ ...filters, [type]: checked ? [...filters[type], selection] : filters[type].filter(value => value !== selection) });
     };
 
-    const onActiveStateSelect = (event, selection) => {
-        onSelect('activeState', event, selection);
+    const onActiveStateSelect = (selection, checked) => {
+        onSelect('activeState', checked, selection);
     };
 
-    const onFileStateSelect = (event, selection) => {
-        onSelect('fileState', event, selection);
+    const onFileStateSelect = (selection, checked) => {
+        onSelect('fileState', checked, selection);
     };
 
     const getFilterLabelKey = (typeLabel) => {
@@ -794,7 +790,13 @@ const ServicesPageFilters = ({
     const onDeleteChipGroup = (typeLabel) => {
         const type = getFilterLabelKey(typeLabel);
 
-        setFilters({ ...filters, [type]: [] });
+        if (type)
+            setFilters({ ...filters, [type]: [] });
+        else
+            setFilters({
+                activeState: [],
+                fileState: []
+            });
     };
 
     const onClearAllFilters = useCallback(() => {
@@ -811,7 +813,7 @@ const ServicesPageFilters = ({
         filtersRef.current = onClearAllFilters;
     }, [filtersRef, onClearAllFilters]);
 
-    const toolbarItems = <>
+    const toolbarItems =
         <ToolbarToggleGroup toggleIcon={<><span className="pf-v5-c-button__icon pf-m-start"><FilterIcon /></span>{_("Toggle filters")}</>} breakpoint="sm"
                             variant="filter-group" alignment={{ default: 'alignLeft' }}>
             <ToolbarItem variant="search-filter">
@@ -826,36 +828,41 @@ const ServicesPageFilters = ({
                            deleteChip={onDeleteChip}
                            deleteChipGroup={onDeleteChipGroup}
                            categoryName={_("Active state")}>
-                <Select aria-label={_("Active state")}
-                        toggleId="services-dropdown-active-state"
-                        variant="checkbox"
-                        onToggle={(_, isOpen) => setActiveStateFilterIsOpen(isOpen)}
-                        onSelect={onActiveStateSelect}
-                        selections={filters.activeState}
-                        isOpen={activeStateFilterIsOpen}
-                        placeholderText={_("Active state")}>
-                    {activeStateDropdownOptions.map(option => <SelectOption key={option.value}
-                                                                            value={option.label} />)}
-                </Select>
+                <CheckboxSelect
+                    toggleProps={{
+                        id: "services-dropdown-active-state",
+                        "aria-label": _("Active state")
+                    }}
+                    toggleContent={_("Active state")}
+                    onSelect={onActiveStateSelect}
+                    selected={filters.activeState}
+                    options={activeStateDropdownOptions.map(option => {
+                        return {
+                            value: option.label, // sic
+                            content: option.label,
+                        };
+                    })} />
             </ToolbarFilter>
             <ToolbarFilter chips={filters.fileState}
                            deleteChip={onDeleteChip}
                            deleteChipGroup={onDeleteChipGroup}
                            categoryName={_("File state")}>
-                <Select aria-label={_("File state")}
-                        toggleId="services-dropdown-file-state"
-                        variant="checkbox"
-                        onToggle={(_, isOpen) => setFileStateFilterIsOpen(isOpen)}
-                        onSelect={onFileStateSelect}
-                        selections={filters.fileState}
-                        isOpen={fileStateFilterIsOpen}
-                        placeholderText={_("File state")}>
-                    {fileStateDropdownOptions.map(option => <SelectOption key={option.value}
-                                                                          value={option.label} />)}
-                </Select>
+                <CheckboxSelect
+                    toggleProps={{
+                        id: "services-dropdown-file-state",
+                        "aria-label": _("File state")
+                    }}
+                    toggleContent={_("File state")}
+                    onSelect={onFileStateSelect}
+                    selected={filters.fileState}
+                    options={fileStateDropdownOptions.map(option => {
+                        return {
+                            value: option.label, // sic
+                            content: option.label,
+                        };
+                    })} />
             </ToolbarFilter>
-        </ToolbarToggleGroup>
-    </>;
+        </ToolbarToggleGroup>;
 
     return (
         <Toolbar data-loading={loadingUnits}

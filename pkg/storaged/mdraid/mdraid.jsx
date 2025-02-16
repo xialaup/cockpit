@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -43,7 +43,7 @@ import {
 import {
     dialog_open, SelectSpaces,
     BlockingMessage, TeardownMessage,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 
 import { partitionable_block_actions } from "../partitions/actions.jsx";
@@ -81,7 +81,7 @@ function mdraid_stop(mdraid) {
                 }
             },
             Inits: [
-                init_active_usage_processes(client, usage)
+                init_teardown_usage(client, usage)
             ]
         });
         return;
@@ -132,7 +132,7 @@ function mdraid_delete(mdraid, block, card) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage)
+            init_teardown_usage(client, usage)
         ]
     });
 }
@@ -174,9 +174,19 @@ function add_disk(mdraid) {
 }
 
 function missing_bitmap(mdraid) {
+    let policy;
+    if (mdraid.ConsistencyPolicy)
+        policy = mdraid.ConsistencyPolicy;
+    else if (mdraid.ActiveDevices.some(a => a[2].indexOf("journal") >= 0))
+        policy = "journal";
+    else if (mdraid.BitmapLocation && decode_filename(mdraid.BitmapLocation) != "none")
+        policy = "bitmap";
+    else
+        policy = "resync";
+
     return (mdraid.Level != "raid0" &&
             client.mdraids_members[mdraid.path].some(m => m.Size > 100 * 1024 * 1024 * 1024) &&
-            mdraid.BitmapLocation && decode_filename(mdraid.BitmapLocation) == "none");
+            policy == "resync");
 }
 
 export function make_mdraid_page(parent, mdraid) {
@@ -271,7 +281,7 @@ const MDRaidCard = ({ card, mdraid, block }) => {
     if (missing_bitmap(mdraid)) {
         alerts.push(
             <Alert isInline variant="warning" key="bitmap"
-                   title={_("This MDRAID device has no write-intent bitmap. Such a bitmap can reduce sychronization times significantly.")}>
+                   title={_("This MDRAID device has no write-intent bitmap. Such a bitmap can reduce synchronization times significantly.")}>
                 <div className="storage-alert-actions">
                     <StorageButton onClick={fix_bitmap}>{_("Add a bitmap")}</StorageButton>
                 </div>

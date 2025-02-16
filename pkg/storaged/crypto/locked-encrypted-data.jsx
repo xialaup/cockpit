@@ -14,14 +14,13 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
-import client from "../client";
 
 import { StorageCard, new_card } from "../pages.jsx";
-import { format_dialog } from "../block/format-dialog.jsx";
+import { std_format_action } from "../block/actions.jsx";
 import { unlock } from "./actions.jsx";
 
 const _ = cockpit.gettext;
@@ -35,7 +34,7 @@ export function make_locked_encrypted_data_card(next, block) {
         props: { block },
         actions: [
             { title: _("Unlock"), action: () => unlock(block) },
-            { title: _("Format"), action: () => format_dialog(client, block.path), danger: true },
+            std_format_action(block, null),
         ]
     });
 }

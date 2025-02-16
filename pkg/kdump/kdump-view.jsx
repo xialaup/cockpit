@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import '../lib/patternfly/patternfly-5-cockpit.scss';
@@ -414,19 +414,31 @@ export class KdumpPage extends React.Component {
 # A reboot will be required if crashkernel was not set before
 kdumpctl reset-crashkernel`;
         }
-        const shell = `
+        let shell;
+        if (this.state.os_release.NAME?.includes('MicroOS')) {
+            enableCrashKernel = `
+# A reboot will be required if crashkernel was not set before
+transactional-update setup-kdump`;
+            shell = `
+cat > /etc/kdump.conf << EOF
+ ${kdumpconf}
+EOF
+${enableCrashKernel}
+        `;
+        } else {
+            shell = `
 cat > /etc/kdump.conf << EOF
 ${kdumpconf}
 EOF
 systemctl enable --now kdump.service
 ${enableCrashKernel}
 `;
+        }
 
         Dialogs.show(
             <ModificationsExportDialog
-              ansible={exportAnsibleTask(this.props.kdumpStatus.config, this.state.os_release)}
+              ansible={ this.state.os_release.NAME?.includes('MicroOS') ? null : exportAnsibleTask(this.props.kdumpStatus.config, this.state.os_release)}
               shell={shell}
-              show
               onClose={Dialogs.close}
             />);
     }
@@ -483,20 +495,20 @@ ${enableCrashKernel}
                     <span>{ _("Reading...") }</span>
                 </div>
             );
-        } else if (this.props.reservedMemory == 0) {
+        } else if (this.props.reservedMemory === 0) {
             // nothing reserved
             reservedMemory = <span>{_("None")} </span>;
-        } else if (this.props.reservedMemory == "error") {
-            // error while reading
-        } else {
-            // assume we have a proper value
+        } else if (Number.isInteger(this.props.reservedMemory)) {
             // TODO: hint at using debug_mem_level to identify actual memory required?
-            reservedMemory = <span>{this.props.reservedMemory}</span>;
+            reservedMemory = <span>{cockpit.format_bytes(this.props.reservedMemory, { base2: true })}</span>;
+        } else {
+            // error while reading
+            reservedMemory = null;
         }
 
-        const serviceRunning = this.props.kdumpStatus &&
-                             this.props.kdumpStatus.installed &&
-                             this.props.kdumpStatus.state == "running";
+        const serviceRunning = this.props.kdumpStatus?.target &&
+                             this.props.kdumpStatus?.installed &&
+                             this.props.kdumpStatus?.state === "running";
 
         let testButton;
         if (serviceRunning) {

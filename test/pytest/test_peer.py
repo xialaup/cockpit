@@ -70,8 +70,9 @@ async def test_init_failure(rule, init_type, monkeypatch, transport):
     await transport.check_open('test', problem='protocol-error')
 
 
+# this doesn't use await, but requires an event loop
 @pytest.mark.asyncio
-async def test_immediate_shutdown(rule):
+async def test_immediate_shutdown(rule):  # noqa: RUF029
     peer = rule.apply_rule({'payload': 'test'})
     assert peer is not None
     peer.close()
@@ -167,10 +168,10 @@ async def test_await_cancellable_connect_init(bridge):
 
 
 @pytest.mark.asyncio
-async def test_await_cancellable_connect_close(monkeypatch, event_loop, bridge):
+async def test_await_cancellable_connect_close(monkeypatch, bridge):
     monkeypatch.setenv('INIT_TYPE', 'silence')  # make sure we never get "init"
     peer = CancellableConnect(bridge, PEER_CONFIG)
-    event_loop.call_later(0.1, peer.close)  # call peer.close() after .start() is running
+    asyncio.get_running_loop().call_later(0.1, peer.close)  # call peer.close() after .start() is running
     with pytest.raises(asyncio.CancelledError):
         await peer.start()
     # we already called .close()

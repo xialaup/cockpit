@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 import React from "react";
 import cockpit from 'cockpit';
@@ -590,7 +590,7 @@ export function NetworkManagerModel() {
                 listen_port: get("wireguard", "listen-port", 0),
                 peers: get("wireguard", "peers", []).map(peer => ({
                     publicKey: peer['public-key'].v,
-                    endpoint: peer.endpoint?.v, // enpoint of a peer is optional
+                    endpoint: peer.endpoint?.v, // endpoint of a peer is optional
                     allowedIps: peer['allowed-ips']?.v
                 })),
             };
@@ -848,7 +848,7 @@ export function NetworkManagerModel() {
                     function snarf_prop(line, env, prop) {
                         const prefix = "E: " + env + "=";
                         if (line.indexOf(prefix) === 0) {
-                            props[prop] = line.substr(prefix.length);
+                            props[prop] = line.substring(prefix.length);
                         }
                     }
                     res.split('\n').forEach(function(line) {
@@ -1455,7 +1455,7 @@ export function settings_applier(model, device, connection) {
         } else if (device) {
             return device.activate_with_settings(settings);
         } else {
-            cockpit.warn("No way to apply settings", connection, settings);
+            console.warn("No way to apply settings", connection, settings);
             return Promise.resolve();
         }
     };

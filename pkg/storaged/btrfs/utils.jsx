@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 import cockpit from "cockpit";
 
@@ -41,7 +41,7 @@ export function btrfs_device_usage(client, uuid, path) {
 }
 
 /**
- * Calculate the overal btrfs "volume" usage. UDisks only knows the usage per block.
+ * Calculate the overall btrfs "volume" usage. UDisks only knows the usage per block.
  */
 export function btrfs_usage(client, volume) {
     const block_fsys = client.blocks_fsys[volume.path];

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 import cockpit from "cockpit";
 
@@ -80,7 +80,7 @@ function findMemoryDevices(udevdb, info) {
     for (let slot = 0; slot < devices; slot++) {
         let memorySize = parseInt(props[`MEMORY_DEVICE_${slot}_SIZE`], 10);
         if (memorySize) {
-            memorySize = cockpit.format_bytes(memorySize, 1024);
+            memorySize = cockpit.format_bytes(memorySize, { base2: true });
         } else {
             memorySize = _("Unknown");
         }

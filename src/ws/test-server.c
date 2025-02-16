@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -121,7 +121,6 @@ mock_http_info (CockpitWebRequest *request,
                 CockpitWebResponse *response)
 {
   g_autoptr(JsonObject) info = json_object_new ();
-  json_object_set_boolean_member (info, "pybridge", strstr (bridge_argv[0], "py") != NULL);
   json_object_set_boolean_member (info, "skip_slow_tests", g_getenv ("COCKPIT_SKIP_SLOW_TESTS") != NULL);
 
   g_autoptr(GBytes) bytes = cockpit_json_write_bytes (info);
@@ -152,7 +151,7 @@ mock_http_qs (CockpitWebRequest *request,
 }
 
 static gboolean
-on_timeout_send (gpointer data)
+send_numbers (gpointer data)
 {
   CockpitWebResponse *response = data;
   gint *at = g_object_get_data (data, "at");
@@ -175,12 +174,72 @@ on_timeout_send (gpointer data)
   return TRUE;
 }
 
+static const char* SPLIT_UTF8_FRAMES[] = {
+    "initial",
+    /* split an é in the middle */
+    "first half \xc3",
+    "\xa9 second half",
+    "final",
+    NULL,
+};
+
 static gboolean
-mock_http_stream (CockpitWebResponse *response)
+send_split_utf8 (gpointer data)
+{
+  CockpitWebResponse *response = data;
+  gint *at = g_object_get_data (data, "at");
+  const char *frame = SPLIT_UTF8_FRAMES[*at];
+
+  if (frame == NULL)
+    {
+      cockpit_web_response_complete (response);
+      return FALSE;
+    }
+
+  (*at) += 1;
+
+  g_autoptr(GBytes) bytes = g_bytes_new_static (frame, strlen (frame));
+  cockpit_web_response_queue (response, bytes);
+  return TRUE;
+}
+
+static gboolean
+send_truncated_utf8 (gpointer data)
+{
+  CockpitWebResponse *response = data;
+  gint *at = g_object_get_data (data, "at");
+  const char *frame = SPLIT_UTF8_FRAMES[*at];
+
+  /* only send the first two frames */
+  if (*at == 2)
+    {
+      cockpit_web_response_complete (response);
+      return FALSE;
+    }
+
+  (*at) += 1;
+
+  g_autoptr(GBytes) bytes = g_bytes_new_static (frame, strlen (frame));
+  cockpit_web_response_queue (response, bytes);
+  return TRUE;
+}
+
+static gboolean
+send_binary_data (gpointer data)
+{
+  CockpitWebResponse *response = data;
+  g_autoptr(GBytes) bytes = g_bytes_new_static ("\xFF\x01\xFF\x02", 4);
+  cockpit_web_response_queue (response, bytes);
+  cockpit_web_response_complete (response);
+  return FALSE;
+}
+
+static gboolean
+mock_http_stream (CockpitWebResponse *response, GSourceFunc func)
 {
   cockpit_web_response_headers (response, 200, "OK", -1, NULL);
   g_object_set_data_full (G_OBJECT (response), "at", g_new0 (gint, 1), g_free);
-  g_timeout_add_full (G_PRIORITY_DEFAULT, 100, on_timeout_send,
+  g_timeout_add_full (G_PRIORITY_DEFAULT, 100, func,
                       g_object_ref (response), g_object_unref);
 
   return TRUE;
@@ -301,7 +360,13 @@ on_handle_mock (CockpitWebServer *server,
   if (g_str_equal (path, "/qs"))
     return mock_http_qs (request, response);
   if (g_str_equal (path, "/stream"))
-    return mock_http_stream (response);
+    return mock_http_stream (response, send_numbers);
+  if (g_str_equal (path, "/split-utf8"))
+    return mock_http_stream (response, send_split_utf8);
+  if (g_str_equal (path, "/truncated-utf8"))
+    return mock_http_stream (response, send_truncated_utf8);
+  if (g_str_equal (path, "/binary-data"))
+    return mock_http_stream (response, send_binary_data);
   if (g_str_equal (path, "/headers"))
     return mock_http_headers (response, headers);
   if (g_str_equal (path, "/host"))
@@ -894,8 +959,8 @@ main (int argc,
   g_assert (g_mkdir_with_parents (machines_dir, 0755) == 0);
 
   cockpit_setenv_check ("PYTHONPATH", SRCDIR "/src", TRUE);
-  cockpit_setenv_check ("XDG_DATA_HOME", SRCDIR "/src/bridge/mock-resource/home", TRUE);
-  cockpit_setenv_check ("XDG_DATA_DIRS", SRCDIR "/src/bridge/mock-resource/system", TRUE);
+  cockpit_setenv_check ("XDG_DATA_HOME", SRCDIR "/test/data/mock-resource/home", TRUE);
+  cockpit_setenv_check ("XDG_DATA_DIRS", SRCDIR "/test/data/mock-resource/system", TRUE);
   cockpit_setenv_check ("XDG_CONFIG_DIRS", config_dir, TRUE);
 
   setup_path (argv[0]);
@@ -951,9 +1016,6 @@ main (int argc,
     bridge_argv[i++] = "-m";
     bridge_argv[i++] = "cockpit.bridge";
   }
-
-  // Use a local ssh session command
-  cockpit_ws_ssh_program = BUILDDIR "/cockpit-ssh";
 
   loop = g_main_loop_new (NULL, FALSE);
 

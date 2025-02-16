@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 /* ---------------------------------------------------------------------------------------------------- */
@@ -31,6 +31,10 @@
   --ct-topnav-background: var(--pf-v5-global--BackgroundColor--dark-100);
 }
 
+#shell {
+    block-size: 100%;
+}
+
 .pf-v5-theme-dark {
   --ct-topnav-background: var(--pf-v5-global--BackgroundColor--dark-200);
 }
@@ -39,10 +43,6 @@
 
 html.index-page body {
   overflow: hidden;
-}
-
-.hide-before::before {
-  display: none;
 }
 
 #machine-change-auth > p {
@@ -107,7 +107,6 @@ html.index-page body {
 }
 
 iframe.container-frame {
-  display: none;
   border: none;
   inline-size: 100%;
 }

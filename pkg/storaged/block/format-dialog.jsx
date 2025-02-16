@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -28,22 +28,17 @@ import {
     validate_fsys_label,
 } from "../utils.js";
 
-import React from "react";
-import { FormHelperText } from "@patternfly/react-core/dist/esm/components/Form/index.js";
-import { HelperText, HelperTextItem, } from "@patternfly/react-core/dist/esm/components/HelperText/index.js";
-import { ExclamationTriangleIcon, InfoCircleIcon } from "@patternfly/react-icons";
-
 import {
     dialog_open,
     TextInput, PassInput, CheckBoxes, SelectOne, SizeSlider,
     BlockingMessage, TeardownMessage,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 
 import { get_fstab_config, is_valid_mount_point } from "../filesystem/utils.jsx";
 import { init_existing_passphrase, unlock_with_type } from "../crypto/keyslots.jsx";
 import { job_progress_wrapper } from "../jobs-panel.jsx";
-import { at_boot_input, mount_options } from "../filesystem/mounting-dialog.jsx";
+import { at_boot_input, update_at_boot_input, mount_options } from "../filesystem/mounting-dialog.jsx";
 import { remember_passphrase } from "../anaconda.jsx";
 
 const _ = cockpit.gettext;
@@ -87,60 +82,10 @@ export function initial_mount_options(client, block) {
     return initial_tab_options(client, block, true);
 }
 
-export const mount_explanation = {
-    local:
-    <FormHelperText>
-        <HelperText>
-            <HelperTextItem hasIcon>
-                {_("Mounts before services start")}
-            </HelperTextItem>
-            <HelperTextItem hasIcon>
-                {_("Appropriate for critical mounts, such as /var")}
-            </HelperTextItem>
-            <HelperTextItem hasIcon icon={<ExclamationTriangleIcon className="ct-icon-exclamation-triangle" />}>
-                {_("Boot fails if filesystem does not mount, preventing remote access")}
-            </HelperTextItem>
-        </HelperText>
-    </FormHelperText>,
-    nofail:
-    <FormHelperText>
-        <HelperText>
-            <HelperTextItem hasIcon>
-                {_("Mounts in parallel with services")}
-            </HelperTextItem>
-            <HelperTextItem hasIcon icon={<InfoCircleIcon className="ct-icon-info-circle" />}>
-                {_("Boot still succeeds when filesystem does not mount")}
-            </HelperTextItem>
-        </HelperText>
-    </FormHelperText>,
-    netdev:
-    <FormHelperText>
-        <HelperText>
-            <HelperTextItem hasIcon>
-                {_("Mounts in parallel with services, but after network is available")}
-            </HelperTextItem>
-            <HelperTextItem hasIcon icon={<InfoCircleIcon className="ct-icon-info-circle" />}>
-                {_("Boot still succeeds when filesystem does not mount")}
-            </HelperTextItem>
-        </HelperText>
-    </FormHelperText>,
-    never:
-    <FormHelperText>
-        <HelperText>
-            <HelperTextItem hasIcon>
-                {_("Does not mount during boot")}
-            </HelperTextItem>
-            <HelperTextItem hasIcon>
-                {_("Useful for mounts that are optional or need interaction (such as passphrases)")}
-            </HelperTextItem>
-        </HelperText>
-    </FormHelperText>,
-};
-
 export function format_dialog(client, path, start, size, enable_dos_extended) {
     const block = client.blocks[path];
     if (block.IdUsage == "crypto") {
-        cockpit.spawn(["cryptsetup", "luksDump", decode_filename(block.Device)], { superuser: true })
+        cockpit.spawn(["cryptsetup", "luksDump", decode_filename(block.Device)], { superuser: "require" })
                 .then(output => {
                     if (output.indexOf("Keyslots:") >= 0) // This is what luksmeta-monitor-hack looks for
                         return 2;
@@ -176,7 +121,7 @@ function format_dialog_internal(client, path, start, size, enable_dos_extended, 
     const content_block = block.IdUsage == "crypto" ? client.blocks_cleartext[path] : block;
 
     const offer_keep_keys = block.IdUsage == "crypto";
-    const unlock_before_format = offer_keep_keys && !content_block;
+    const unlock_before_format = offer_keep_keys && (!content_block || content_block.ReadOnly);
 
     const create_partition = (start !== undefined);
 
@@ -285,6 +230,8 @@ function format_dialog_internal(client, path, start, size, enable_dos_extended, 
     extract_option(crypto_split_options, "noauto");
     extract_option(crypto_split_options, "nofail");
     extract_option(crypto_split_options, "_netdev");
+    extract_option(crypto_split_options, "readonly");
+    extract_option(crypto_split_options, "read-only");
     const crypto_extra_options = unparse_options(crypto_split_options);
 
     let [, old_dir, old_opts] = get_fstab_config(block, true,
@@ -434,9 +381,8 @@ function format_dialog_internal(client, path, start, size, enable_dos_extended, 
             mount_options(opt_ro, extra_options, is_filesystem),
         ],
         update: function (dlg, vals, trigger) {
-            if (trigger == "at_boot")
-                dlg.set_options("at_boot", { explanation: mount_explanation[vals.at_boot] });
-            else if (trigger == "type") {
+            update_at_boot_input(dlg, vals, trigger);
+            if (trigger == "type") {
                 if (dlg.get_value("type") == "empty") {
                     dlg.update_actions({ Variants: action_variants_for_empty });
                 } else if (dlg.get_value("type") == "swap") {
@@ -494,6 +440,8 @@ function format_dialog_internal(client, path, start, size, enable_dos_extended, 
                 if (is_encrypted(vals)) {
                     let opts = [];
                     if (is_filesystem(vals)) {
+                        if (vals.mount_options?.ro)
+                            opts.push("readonly");
                         if (!mount_now || vals.at_boot == "never")
                             opts.push("noauto");
                         if (vals.at_boot == "nofail")
@@ -572,17 +520,24 @@ function format_dialog_internal(client, path, start, size, enable_dos_extended, 
                 if (config_items.length > 0)
                     options["config-items"] = { t: 'a(sa{sv})', v: config_items };
 
-                function maybe_unlock() {
+                async function maybe_unlock() {
                     const content_block = client.blocks_cleartext[path];
-                    if (content_block)
+                    if (content_block) {
+                        if (content_block.ReadOnly) {
+                            const block_crypto = client.blocks_crypto[path];
+                            await block_crypto.Lock({});
+                            await unlock_with_type(client, block, vals.old_passphrase, existing_passphrase_type, false);
+                        }
                         return content_block;
+                    }
 
-                    return (unlock_with_type(client, block, vals.old_passphrase, existing_passphrase_type)
-                            .catch(error => {
-                                dlg.set_values({ needs_explicit_passphrase: true });
-                                return Promise.reject(error);
-                            })
-                            .then(() => client.blocks_cleartext[path]));
+                    try {
+                        await unlock_with_type(client, block, vals.old_passphrase, existing_passphrase_type, false);
+                        return client.blocks_cleartext[path];
+                    } catch (error) {
+                        dlg.set_values({ needs_explicit_passphrase: true });
+                        throw error;
+                    }
                 }
 
                 function format() {
@@ -644,6 +599,15 @@ function format_dialog_internal(client, path, start, size, enable_dos_extended, 
                     if (is_encrypted(vals))
                         remember_passphrase(new_block, vals.passphrase);
 
+                    if (is_encrypted(vals) && is_filesystem(vals) && vals.mount_options?.ro) {
+                        const block_crypto = await client.wait_for(() => block_crypto_for_block(path));
+                        await block_crypto.Lock({});
+                        if (vals.passphrase)
+                            await block_crypto.Unlock(vals.passphrase, { "read-only": { t: "b", v: true } });
+                        else
+                            await unlock_with_type(client, block, vals.old_passphrase, existing_passphrase_type, true);
+                    }
+
                     if (is_filesystem(vals) && mount_now) {
                         const block_fsys = await client.wait_for(() => block_fsys_for_block(path));
                         await client.mount_at(client.blocks[block_fsys.path], mount_point);
@@ -666,7 +630,7 @@ function format_dialog_internal(client, path, start, size, enable_dos_extended, 
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage),
+            init_teardown_usage(client, usage),
             unlock_before_format
                 ? init_existing_passphrase(block, true, type => { existing_passphrase_type = type })
                 : null

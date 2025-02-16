@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 # export uReport_URL="http://localhost:12345"
 
-import cgi
+import email
+import email.parser
+import email.policy
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -9,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST_attach(self):
-        self.wfile.write(json.dumps({'result': True}).encode("UTF-8"))
+        self.wfile.write(json.dumps({'result': True}).encode())
 
     def do_POST_new(self):
         response = {
@@ -29,24 +31,28 @@ class Handler(BaseHTTPRequestHandler):
             ],
             'result': False
         }
-        self.wfile.write(json.dumps(response, indent=2).encode('UTF-8'))
+        self.wfile.write(json.dumps(response, indent=2).encode())
 
     def do_POST(self):
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={
-                'REQUEST_METHOD': 'POST',
-                'CONTENT_TYPE': self.headers['Content-Type'],
-            }
-        )
+        content_length = int(self.headers.get('content-length', 0))
+        data = self.rfile.read(content_length)
+
+        # Without the cgi module, we need to massage the data to form a valid message
+        p = email.parser.BytesFeedParser(policy=email.policy.HTTP)
+        p.feed('Content-Type: {}\r\n'.format(self.headers.get('content-type', '')).encode())
+        p.feed('\r\n'.encode())
+        p.feed(data)
+        m = p.close()
+
+        assert m.is_multipart(), "not a multipart message"
+        parts = list(m.iter_parts())
+        json_str = parts[0].get_payload()
 
         self.send_response(202)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Connection', 'close')
         self.end_headers()
 
-        json_str = form['file'].file.read()
         try:
             # just check that it's a JSON
             json.loads(json_str)

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import React, { useState } from 'react';
@@ -120,7 +120,6 @@ export const StorageButton = ({ id, kind, excuse, onClick, children, ariaLabel, 
                                        onClick={checked(onClick, setSpinning)}
                                        variant={kind || "secondary"}
                                        isDisabled={!!excuse || (spinner && spinning)}
-                                       style={excuse ? { pointerEvents: 'none' } : null}
                                        isLoading={spinner ? spinning : undefined}>
                                    {children}
                                </Button>
@@ -131,7 +130,6 @@ export const StorageLink = ({ id, excuse, onClick, children }) => (
     <StorageControl excuse={excuse}
                     content={excuse => (
                         <Button onClick={checked(onClick)}
-                                style={excuse ? { pointerEvents: 'none' } : null}
                                 variant="link"
                                 isInline
                                 isDisabled={!!excuse}>
@@ -202,7 +200,7 @@ export const StorageUsageBar = ({ stats, critical, block, offset, total, short }
             </span>
             <div className={"usage-bar" + (fraction > critical ? " usage-bar-danger" : "") + (short ? " usage-bar-short" : "")}
                  role="progressbar"
-                 aria-valuemin="0" aria-valuemax={stats[1]} aria-valuenow={stats[0]}
+                 aria-valuemin={0} aria-valuemax={stats[1]} aria-valuenow={stats[0]}
                  aria-label={cockpit.format(_("Usage of $0"), block)}
                  aria-valuetext={labelText}>
                 <div className="usage-bar-indicator usage-bar-other" aria-hidden="true" style={{ width: total_fraction * 100 + "%" }} />

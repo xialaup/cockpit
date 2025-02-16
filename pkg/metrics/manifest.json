@@ -7,5 +7,12 @@
                 "url": "https://pcp.readthedocs.io/en/latest/"
             }
         ]
+    },
+
+    "config": {
+        "redis_package": {
+            "fedora": "valkey",
+            "platform:el10": "valkey"
+        }
     }
 }

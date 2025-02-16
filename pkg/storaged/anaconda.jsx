@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import client from "./client.js";
@@ -102,7 +102,7 @@ export function export_mount_point_mapping() {
                 const device = decode_filename(c[1].device.v);
                 let content_info;
                 if (device.startsWith("UUID=")) {
-                    content_info = tab_info(config, device.substr(5));
+                    content_info = tab_info(config, device.substring(5));
                 }
 
                 return {

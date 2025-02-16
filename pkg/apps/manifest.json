@@ -1,4 +1,9 @@
 {
+    "conditions": [
+        {"path-exists": "/usr/bin/cockpit-bridge"},
+        {"path-exists": "/lib/systemd/system/packagekit.service"},
+        {"path-not-exists": "/sysroot/ostree"}
+    ],
     "tools": {
         "index": {
             "label": "Applications",
@@ -9,8 +14,6 @@
             ]
         }
     },
-
-    "content-security-policy": "img-src *",
 
     "config": {
         "appstream_config_packages": {

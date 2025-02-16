@@ -15,18 +15,17 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import netlib
 import testlib
 from lib.constants import TEST_OS_DEFAULT
 
 
-@testlib.skipDistroPackage()
 class TestNetworkingMAC(netlib.NetworkCase):
     provision = {
         "machine1": {"memory_mb": 512},
-        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True, "memory_mb": 256}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True, "memory_mb": 512}
     }
 
     def testMac(self):
@@ -48,8 +47,8 @@ class TestNetworkingMAC(netlib.NetworkCase):
             new_mac = self.network.interface()["mac"]
             b.click("#network-interface-mac button")
             b.wait_visible("#network-mac-settings-dialog")
-            b.set_input_text('#network-mac-settings-mac-input-select-typeahead', new_mac)
-            b.click(".pf-v5-c-select ul > li > button")
+            b.set_input_text('#network-mac-settings-mac-input input', new_mac)
+            b.click(".pf-v5-c-menu ul > li > button")
             b.click("#network-mac-settings-save")
             b.wait_not_present("#network-mac-settings-dialog")
 
@@ -89,8 +88,8 @@ class TestNetworkingMAC(netlib.NetworkCase):
             new_mac = self.network.interface()["mac"]
             b.click("#network-interface-mac button")
             b.wait_visible("#network-mac-settings-dialog")
-            b.set_input_text('#network-mac-settings-mac-input-select-typeahead', new_mac)
-            b.click(".pf-v5-c-select ul > li > button")
+            b.set_input_text('#network-mac-settings-mac-input input', new_mac)
+            b.click(".pf-v5-c-menu ul > li > button")
             b.click("#network-mac-settings-save")
             b.wait_not_present("#network-mac-settings-dialog")
 

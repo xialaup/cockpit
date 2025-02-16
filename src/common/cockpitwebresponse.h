@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_WEB_RESPONSE_H__
@@ -95,6 +95,11 @@ void                  cockpit_web_response_content       (CockpitWebResponse *se
                                                           GBytes *block,
                                                           ...) G_GNUC_NULL_TERMINATED;
 
+void                  cockpit_web_response_error_with_body (CockpitWebResponse *self,
+                                                            guint code,
+                                                            const gchar *reason,
+                                                            GHashTable *headers,
+                                                            GBytes *body);
 void                  cockpit_web_response_error         (CockpitWebResponse *self,
                                                           guint status,
                                                           GHashTable *headers,
@@ -103,6 +108,7 @@ void                  cockpit_web_response_error         (CockpitWebResponse *se
 
 void                  cockpit_web_response_gerror        (CockpitWebResponse *self,
                                                           GHashTable *headers,
+                                                          GBytes *body,
                                                           GError *error);
 
 gchar **              cockpit_web_response_resolve_roots (const gchar **roots);

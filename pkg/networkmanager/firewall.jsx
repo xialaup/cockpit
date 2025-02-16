@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import '../lib/patternfly/patternfly-5-cockpit.scss';
@@ -791,7 +791,7 @@ class ActivateZoneModal extends React.Component {
         const interfaces = firewall.availableInterfaces.filter(i => {
             let inZone = false;
             firewall.activeZones.forEach(z => {
-                inZone |= firewall.zones[z].interfaces.indexOf(i.device) !== -1;
+                inZone ||= firewall.zones[z].interfaces.indexOf(i.device) !== -1;
             });
             return !inZone;
         });

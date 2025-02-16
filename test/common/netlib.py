@@ -13,7 +13,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import re
 import subprocess
@@ -44,11 +44,13 @@ class NetworkHelpers:
         if dhcp_cidr:
             # up the remote end, give it an IP, and start DHCP server
             self.machine.execute(f"ip a add {dhcp_cidr} dev v_{name}; ip link set v_{name} up")
-            server = self.machine.spawn("dnsmasq --keep-in-foreground --log-queries --log-facility=- "
-                                        f"--conf-file=/dev/null --dhcp-leasefile=/tmp/leases.{name} --no-resolv "
+
+            self.machine.execute("mkdir -p /run/dnsmasq")
+            server = self.machine.spawn(f"dnsmasq --keep-in-foreground --log-queries --log-facility=- "
+                                        f"--conf-file=/dev/null --dhcp-leasefile=/run/dnsmasq/leases.{name} --no-resolv "
                                         f"--bind-interfaces --except-interface=lo --interface=v_{name} --dhcp-range={dhcp_range[0]},{dhcp_range[1]},4h",
                                         f"dhcp-{name}.log")
-            self.addCleanup(self.machine.execute, "kill %i" % server)
+            self.addCleanup(self.machine.execute, f"kill {server}; rm -rf /run/dnsmasq")
             self.machine.execute("if firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --add-service=dhcp; fi")
 
     def nm_activate_eth(self, iface):
@@ -120,7 +122,7 @@ class NetworkCase(MachineCase, NetworkHelpers):
 
         ver = self.machine.execute(
             "busctl --system get-property org.freedesktop.NetworkManager /org/freedesktop/NetworkManager org.freedesktop.NetworkManager Version || true")
-        ver_match = re.match('s "(.*)"', ver)
+        ver_match = re.match(r's "(.*)"', ver)
         if ver_match:
             self.networkmanager_version = [int(x) for x in ver_match.group(1).split(".")]
         else:

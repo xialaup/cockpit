@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_LOCALE_H__
@@ -27,8 +27,6 @@ G_BEGIN_DECLS
 gchar *               cockpit_locale_from_language       (const gchar *language,
                                                           const gchar *encoding,
                                                           gchar **shorter);
-
-void                  cockpit_locale_set_language        (const gchar *language);
 
 G_END_DECLS
 

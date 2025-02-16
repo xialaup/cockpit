@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -30,7 +30,7 @@ import { Flex, FlexItem } from "@patternfly/react-core/dist/esm/layouts/Flex/ind
 import { VolumeIcon } from "../icons/gnome-icons.jsx";
 import { fmt_to_fragments } from "utils.jsx";
 
-import { StorageButton, StorageUsageBar, StorageLink } from "../storage-controls.jsx";
+import { StorageButton, StorageUsageBar, StorageLink, StorageOnOff } from "../storage-controls.jsx";
 import {
     StorageCard, StorageDescription, ChildrenTable, PageTable,
     new_page, new_card, PAGE_CATEGORY_VIRTUAL,
@@ -43,15 +43,14 @@ import {
 } from "../utils.js";
 
 import {
-    dialog_open, SelectSpaces, TextInput, PassInput, SelectOne, SizeSlider,
+    dialog_open, SelectSpaces, TextInput, PassInput, SelectOne, SizeSlider, CheckBoxes, Group,
     BlockingMessage, TeardownMessage,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 
 import { validate_url, get_tang_adv } from "../crypto/tang.jsx";
 import { is_valid_mount_point } from "../filesystem/utils.jsx";
-import { mount_explanation } from "../block/format-dialog.jsx";
-import { at_boot_input, mount_options } from "../filesystem/mounting-dialog.jsx";
+import { at_boot_input, update_at_boot_input, mount_options } from "../filesystem/mounting-dialog.jsx";
 
 import {
     validate_pool_name, std_reply, with_keydesc, with_stored_passphrase,
@@ -73,7 +72,6 @@ function create_fs(pool) {
     const filesystems = client.stratis_pool_filesystems[pool.path];
     const stats = client.stratis_pool_stats[pool.path];
     const forced_options = ["x-systemd.requires=stratis-fstab-setup@" + pool.Uuid + ".service"];
-    const managed_fsys_sizes = client.features.stratis_managed_fsys_sizes && !pool.Overprovisioning;
 
     let action_variants;
     if (!client.in_anaconda_mode()) {
@@ -94,13 +92,42 @@ function create_fs(pool) {
                       {
                           validate: name => validate_fs_name(null, name, filesystems)
                       }),
-            SizeSlider("size", _("Size"),
-                       {
-                           visible: () => managed_fsys_sizes,
-                           min: fsys_min_size,
-                           max: stats.pool_free,
-                           round: 512
-                       }),
+            Group(_("Stratis filesystem"), [
+                CheckBoxes("set_custom_size", null,
+                           {
+                               value: {
+                                   enabled: !pool.Overprovisioning,
+                               },
+                               fields: [
+                                   { tag: "enabled", title: _("Set initial size") },
+                               ]
+                           }),
+                SizeSlider("size", null,
+                           {
+                               visible: vals => vals.set_custom_size.enabled,
+                               min: fsys_min_size,
+                               max: pool.Overprovisioning ? stats.pool_total : stats.pool_free,
+                               allow_infinite: pool.Overprovisioning,
+                               round: 512
+                           }),
+                CheckBoxes("set_custom_limit", null,
+                           {
+                               value: {
+                                   enabled: false,
+                               },
+                               fields: [
+                                   { tag: "enabled", title: _("Limit size") },
+                               ]
+                           }),
+                SizeSlider("limit", null,
+                           {
+                               visible: vals => vals.set_custom_limit.enabled,
+                               min: fsys_min_size,
+                               max: pool.Overprovisioning ? stats.pool_total : stats.pool_free,
+                               allow_infinite: true,
+                               round: 512
+                           }),
+            ]),
             TextInput("mount_point", _("Mount point"),
                       {
                           validate: (val, values, variant) => {
@@ -111,23 +138,20 @@ function create_fs(pool) {
                           }
                       }),
             mount_options(false, false),
-            at_boot_input(client.in_anaconda_mode() ? "local" : "nofail"),
+            at_boot_input(),
         ],
-        update: function (dlg, vals, trigger) {
-            if (trigger == "at_boot")
-                dlg.set_options("at_boot", { explanation: mount_explanation[vals.at_boot] });
-        },
+        update: update_at_boot_input,
         Action: {
             Variants: action_variants,
-            action: function (vals) {
-                return client.stratis_create_filesystem(pool, vals.name, vals.size)
-                        .then(std_reply)
-                        .then(result => {
-                            if (result[0])
-                                return set_mount_options(result[1][0][0], vals, forced_options);
-                            else
-                                return Promise.resolve();
-                        });
+            action: async function (vals) {
+                let size_spec = [false, ""]; let limit_spec = [false, ""];
+                if (vals.set_custom_size.enabled)
+                    size_spec = [true, vals.size.toString()];
+                if (vals.set_custom_limit.enabled)
+                    limit_spec = [true, vals.limit.toString()];
+                const result = await pool.CreateFilesystems([[vals.name, size_spec, limit_spec]]).then(std_reply);
+                if (result[0])
+                    await set_mount_options(result[1][0][0], vals, forced_options);
             }
         }
     });
@@ -158,7 +182,7 @@ function delete_pool(pool, card) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage)
+            init_teardown_usage(client, usage)
         ]
     });
 }
@@ -198,7 +222,6 @@ function add_disks(pool) {
                                   {
                                       value: "cache",
                                       title: _("Cache"),
-                                      disabled: pool.Encrypted && !client.features.stratis_encrypted_caches
                                   }
                               ]
                           }),
@@ -249,21 +272,17 @@ function make_stratis_filesystem_pages(parent, pool) {
     const filesystems = client.stratis_pool_filesystems[pool.path];
     const stats = client.stratis_pool_stats[pool.path];
     const forced_options = ["x-systemd.requires=stratis-fstab-setup@" + pool.Uuid + ".service"];
-    const managed_fsys_sizes = client.features.stratis_managed_fsys_sizes && !pool.Overprovisioning;
 
     filesystems.forEach((fs, i) => make_stratis_filesystem_page(parent, pool, fs,
                                                                 stats.fsys_offsets[i],
-                                                                forced_options,
-                                                                managed_fsys_sizes));
+                                                                forced_options));
 }
 
 export function make_stratis_pool_page(parent, pool) {
     const degraded_ops = pool.AvailableActions && pool.AvailableActions !== "fully_operational";
     const blockdevs = client.stratis_pool_blockdevs[pool.path] || [];
-    const can_grow =
-          (client.features.stratis_grow_blockdevs &&
-           blockdevs.some(bd => bd.NewPhysicalSize[0] && Number(bd.NewPhysicalSize[1]) > Number(bd.TotalPhysicalSize)));
-    const managed_fsys_sizes = client.features.stratis_managed_fsys_sizes && !pool.Overprovisioning;
+    const can_grow = blockdevs.some(bd => (bd.NewPhysicalSize[0] &&
+                                           Number(bd.NewPhysicalSize[1]) > Number(bd.TotalPhysicalSize)));
     const stats = client.stratis_pool_stats[pool.path];
 
     const use = pool.TotalPhysicalUsed[0] && [Number(pool.TotalPhysicalUsed[1]), Number(pool.TotalPhysicalSize)];
@@ -278,11 +297,11 @@ export function make_stratis_pool_page(parent, pool) {
         page_name: pool.Name,
         page_icon: VolumeIcon,
         page_category: PAGE_CATEGORY_VIRTUAL,
-        page_size: ((!managed_fsys_sizes && use)
+        page_size: (use
             ? <StorageUsageBar key="s" stats={use} short />
             : Number(pool.TotalPhysicalSize)),
         component: StratisPoolCard,
-        props: { pool, degraded_ops, can_grow, managed_fsys_sizes, stats },
+        props: { pool, degraded_ops, can_grow, stats },
         actions: [
             {
                 title: _("Add block devices"),
@@ -301,13 +320,13 @@ export function make_stratis_pool_page(parent, pool) {
         next: pool_card,
         has_warning: degraded_ops || can_grow,
         component: StratisFilesystemsCard,
-        props: { pool, degraded_ops, can_grow, managed_fsys_sizes, stats },
+        props: { pool, degraded_ops, can_grow, stats },
         actions: [
             {
                 title: _("Create new filesystem"),
                 action: () => create_fs(pool),
-                excuse: (managed_fsys_sizes && stats.pool_free < fsys_min_size
-                    ? _("Not enough space")
+                excuse: ((!pool.Overprovisioning && stats.pool_free < fsys_min_size)
+                    ? _("Not enough free space")
                     : null),
             },
         ],
@@ -318,7 +337,7 @@ export function make_stratis_pool_page(parent, pool) {
     make_stratis_filesystem_pages(p, pool);
 }
 
-const StratisFilesystemsCard = ({ card, pool, degraded_ops, can_grow, managed_fsys_sizes, stats }) => {
+const StratisFilesystemsCard = ({ card, pool, degraded_ops, can_grow, stats }) => {
     const blockdevs = client.stratis_pool_blockdevs[pool.path] || [];
 
     function grow_blockdevs() {
@@ -365,12 +384,11 @@ const StratisFilesystemsCard = ({ card, pool, degraded_ops, can_grow, managed_fs
     );
 };
 
-const StratisPoolCard = ({ card, pool, degraded_ops, can_grow, managed_fsys_sizes, stats }) => {
+const StratisPoolCard = ({ card, pool, degraded_ops, can_grow, stats }) => {
     const key_desc = (pool.Encrypted &&
                       pool.KeyDescription[0] &&
                       pool.KeyDescription[1][1]);
-    const can_tang = (client.features.stratis_crypto_binding &&
-                      pool.Encrypted &&
+    const can_tang = (pool.Encrypted &&
                       pool.ClevisInfo[0] && // pool has consistent clevis config
                       (!pool.ClevisInfo[1][0] || pool.ClevisInfo[1][1][0] == "tang")); // not bound or bound to "tang"
     const tang_url = can_tang && pool.ClevisInfo[1][0] ? JSON.parse(pool.ClevisInfo[1][1][1]).url : null;
@@ -521,12 +539,27 @@ const StratisPoolCard = ({ card, pool, degraded_ops, can_grow, managed_fsys_size
                                {_("edit")}
                            </StorageLink>} />
                     <StorageDescription title={_("UUID")} value={pool.Uuid} />
-                    { !managed_fsys_sizes && use &&
+                    { use &&
                     <StorageDescription title={_("Usage")}>
-                        <StorageUsageBar stats={use} critical={0.95} />
+                        <StorageUsageBar stats={use} critical={0.80} />
                     </StorageDescription>
                     }
-                    { pool.Encrypted && client.features.stratis_crypto_binding &&
+                    <StorageDescription title={_("Overprovisioning")}>
+                        <StorageOnOff state={pool.Overprovisioning}
+                                      aria-label={_("Allow overprovisioning")}
+                                      onChange={() => client.stratis_set_property(pool,
+                                                                                  "Overprovisioning",
+                                                                                  "b", !pool.Overprovisioning)}
+                                      excuse={(pool.Overprovisioning && stats.fsys_total_size > stats.pool_total)
+                                          ? _("Virtual filesystem sizes are larger than the pool. Overprovisioning can not be disabled.")
+                                          : null} />
+                    </StorageDescription>
+                    { !pool.Overprovisioning &&
+                    <StorageDescription title={_("Allocated")}>
+                        <StorageUsageBar stats={[stats.fsys_total_size, stats.pool_total]} critical={2} />
+                    </StorageDescription>
+                    }
+                    { pool.Encrypted &&
                     <StorageDescription title={_("Passphrase")}>
                         <Flex>
                             { !key_desc

@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.querySelector(".super-channel .pf-v5-c-button").addEventListener("click", () => {
         document.querySelector(".super-channel span").textContent = "checking...";
-        cockpit.spawn(["id"], { superuser: true })
+        cockpit.spawn(["id"], { superuser: "require" })
                 .then(data => {
                     console.log("done");
                     document.querySelector(".super-channel span").textContent = "result: " + data;
@@ -125,6 +125,32 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("hidden").textContent = cockpit.hidden ? "hidden" : "visible";
     }
 
+    cockpit.user().then(info => {
+        console.log(info);
+        document.getElementById("user-info").textContent = JSON.stringify(info);
+    });
+
     cockpit.addEventListener("visibilitychange", show_hidden);
     show_hidden();
+
+    const fsreplace_btn = document.getElementById("fsreplace1-create");
+    const fsreplace_error = document.getElementById("fsreplace1-error");
+    fsreplace_btn.addEventListener("click", e => {
+        fsreplace_btn.disabled = true;
+        fsreplace_error.textContent = '';
+        const filename = document.getElementById("fsreplace1-filename").value;
+        const content = document.getElementById("fsreplace1-content").value;
+        const use_tag = document.getElementById("fsreplace1-use-tag").checked;
+        const file = cockpit.file(filename, { superuser: "try" });
+
+        file.read().then((_content, tag) => {
+            file.replace(content, use_tag ? tag : undefined)
+                    .catch(exc => {
+                        fsreplace_error.textContent = exc.toString();
+                    })
+                    .finally(() => {
+                        fsreplace_btn.disabled = false;
+                    });
+        });
+    });
 });

@@ -15,11 +15,11 @@ on:
       - pkg/storaged/**
 jobs:
   trigger:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       statuses: write
-    container: registry.fedoraproject.org/fedora:rawhide
+    container: registry.fedoraproject.org/fedora:40
     # this polls for a COPR build, which can take long
     timeout-minutes: 120
 

@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef __COCKPIT_SYSTEM_H__
@@ -28,10 +28,6 @@ G_BEGIN_DECLS
 GHashTable *         cockpit_system_load_os_release            (void);
 
 const gchar **       cockpit_system_os_release_fields          (void);
-
-guint64              cockpit_system_process_start_time         (void);
-
-char *               cockpit_system_session_id                 (void);
 
 void                 cockpit_setenv_check                     (const char *variable,
                                                                const char *value,

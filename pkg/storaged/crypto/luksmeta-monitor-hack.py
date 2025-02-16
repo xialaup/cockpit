@@ -21,7 +21,7 @@ def b64_decode(data):
 
 
 def get_clevis_config_from_protected_header(protected_header):
-    header = b64_decode(protected_header).decode("utf-8")
+    header = b64_decode(protected_header).decode()
     header_object = json.loads(header)
     clevis = header_object.get("clevis", None)
     if clevis is None:
@@ -73,9 +73,9 @@ def info(dev):
             in_luks2_token_section = True
 
         if in_luks2_slot_section:
-            match = re.match(b"  ([0-9]+): luks2$", line)
+            match = re.match(rb"  ([0-9]+): luks2$", line)
         else:
-            match = re.match(b"Key Slot ([0-9]+): ENABLED$", line)
+            match = re.match(rb"Key Slot ([0-9]+): ENABLED$", line)
         if match:
             slot = int(match.group(1))
             entry = {"Index": {"v": slot}}
@@ -85,7 +85,7 @@ def info(dev):
                                                         "-u", "cb6e8904-81ff-40da-a84a-07ab9ab5715e"],
                                                        stderr=subprocess.PIPE)
                     entry["ClevisConfig"] = {
-                        "v": json.dumps(get_clevis_config_from_jwe(luksmeta.decode("utf-8")))
+                        "v": json.dumps(get_clevis_config_from_jwe(luksmeta.decode()))
                     }
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     pass
@@ -93,12 +93,13 @@ def info(dev):
                 slots[slot] = entry
 
         if in_luks2_token_section:
-            match = re.match(b"  ([0-9]+): clevis$", line)
+            match = re.match(rb"  ([0-9]+): clevis$", line)
             if match:
                 try:
-                    token = subprocess.check_output(["cryptsetup", "token", "export", dev, "--token-id", match.group(1)],
+                    token = subprocess.check_output(["cryptsetup", "token", "export",
+                                                     dev, "--token-id", match.group(1)],
                                                     stderr=subprocess.PIPE)
-                    token_object = json.loads(token.decode("utf-8"))
+                    token_object = json.loads(token.decode())
                     if token_object.get("type") == "clevis":
                         config = json.dumps(get_clevis_config_from_protected_header(token_object["jwe"]["protected"]))
                         for slot_str in token_object.get("keyslots", []):

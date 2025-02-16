@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -24,6 +24,8 @@ import * as timeformat from "timeformat";
 
 const _ = cockpit.gettext;
 const C_ = cockpit.gettext;
+
+export const BTRFS_TOOL_MOUNT_PATH = "/run/cockpit/btrfs/";
 
 /* UTILITIES
  */
@@ -102,6 +104,7 @@ export function set_crypto_options(block, readonly, auto, nofail, netdev) {
         const opts = config.options ? parse_options(decode_filename(config.options.v)) : [];
         if (readonly !== null) {
             extract_option(opts, "readonly");
+            extract_option(opts, "read-only");
             if (readonly)
                 opts.push("readonly");
         }
@@ -150,14 +153,8 @@ export function flatten(array_of_arrays) {
         return [];
 }
 
-export function decode_filename(encoded) {
-    return cockpit.utf8_decoder().decode(cockpit.base64_decode(encoded).slice(0, -1));
-}
-
-export function encode_filename(decoded) {
-    return cockpit.base64_encode(cockpit.utf8_encoder().encode(decoded)
-            .concat([0]));
-}
+export const decode_filename = encoded => window.atob(encoded).replace('\u0000', '');
+export const encode_filename = decoded => window.btoa(decoded + '\u0000');
 
 export function get_block_mntopts(config) {
     // treat an absent field as "default", like util-linux
@@ -169,8 +166,8 @@ export function fmt_size(bytes) {
 }
 
 export function fmt_size_long(bytes) {
-    const with_decimal_unit = cockpit.format_bytes(bytes, 1000);
-    const with_binary_unit = cockpit.format_bytes(bytes, 1024);
+    const with_decimal_unit = cockpit.format_bytes(bytes);
+    const with_binary_unit = cockpit.format_bytes(bytes, { base2: true });
     /* Translators: Used in "..." */
     return with_decimal_unit + ", " + with_binary_unit + ", " + bytes + " " + C_("format-bytes", "bytes");
 }
@@ -187,10 +184,11 @@ export function format_temperature(kelvin) {
 
 export function format_fsys_usage(used, total) {
     let text = "";
-    let parts = cockpit.format_bytes(total, undefined, { separate: true, precision: 2 });
+    let parts = cockpit.format_bytes(total, { separate: true, precision: 2 });
     text = " / " + parts.join(" ");
     const unit = parts[1];
 
+    // FIXME: passing explicit unit is deprecated, redesign this
     parts = cockpit.format_bytes(used, unit, { separate: true, precision: 2 });
     return parts[0] + text;
 }
@@ -231,7 +229,7 @@ export function validate_fsys_label(label, type) {
     };
 
     const limit = fs_label_max[type.replace("luks+", "")];
-    const bytes = cockpit.utf8_encoder().encode(label);
+    const bytes = new TextEncoder().encode(label);
     if (limit && bytes.length > limit) {
         // Let's not confuse people with encoding issues unless
         // they use funny characters.
@@ -683,13 +681,13 @@ export function should_ignore(client, path) {
 /* GET_CHILDREN gets the direct children of the storage object at
    PATH, like the partitions of a partitioned block device, or the
    volume group of a physical volume.  By calling GET_CHILDREN
-   recursively, you can traverse the whole storage hierachy from
+   recursively, you can traverse the whole storage hierarchy from
    hardware drives at the bottom to filesystems at the top.
 
    GET_CHILDREN_FOR_TEARDOWN is similar but doesn't consider things
    like volume groups to be children of their physical volumes.  This
    is appropriate for teardown processing, where tearing down a
-   physical volume does not imply tearing down the whole volume groups
+   physical volume does not imply tearing down the whole volume group
    with everything that it contains.
 */
 
@@ -868,6 +866,11 @@ export function get_active_usage(client, path, top_action, child_action, is_temp
             const [, mount_point] = get_fstab_config_with_client(client, block);
             const has_fstab_entry = is_temporary && location == mount_point;
 
+            // Ignore the secret btrfs mount point unless we are
+            // formatting (in which case subvol is false).
+            if (btrfs_volume && subvol && location.startsWith(BTRFS_TOOL_MOUNT_PATH))
+                return;
+
             for (const u of usage) {
                 if (u.usage == 'mounted' && u.location == location) {
                     if (is_top) {
@@ -885,7 +888,7 @@ export function get_active_usage(client, path, top_action, child_action, is_temp
                 has_fstab_entry,
                 set_noauto: !is_top && !is_temporary,
                 actions: (is_top ? get_actions(_("unmount")) : [_("unmount")]).concat(has_fstab_entry ? [_("mount")] : []),
-                blocking: client.strip_mount_point_prefix(location) === false,
+                blocking: client.strip_mount_point_prefix(location) === false && !location.startsWith(BTRFS_TOOL_MOUNT_PATH),
             });
         }
 
@@ -977,14 +980,14 @@ export function get_active_usage(client, path, top_action, child_action, is_temp
         return usage;
     }
 
-    let usage = [];
+    const usage = [];
     get_usage(usage, path, 0);
-
-    if (usage.length == 1 && usage[0].level == 0 && usage[0].usage == "none")
-        usage = [];
 
     usage.Blocking = usage.some(u => u.blocking);
     usage.Teardown = usage.some(u => !u.blocking);
+
+    if (usage.length == 1 && usage[0].level == 0 && usage[0].usage == "none")
+        usage.Teardown = false;
 
     return usage;
 }
@@ -1103,7 +1106,7 @@ export function reload_systemd() {
 
 export function is_mounted_synch(block) {
     return (cockpit.spawn(["findmnt", "-n", "-o", "TARGET", "-S", decode_filename(block.Device)],
-                          { superuser: true, err: "message" })
+                          { superuser: "require", err: "message" })
             .then(data => data.trim())
             .catch(() => false));
 }
@@ -1138,4 +1141,20 @@ export function get_mount_points(client, block_fsys, subvol) {
     }
 
     return mounted_at;
+}
+
+export function get_byte_units(guide_value) {
+    const units = [
+        { factor: 1000 ** 2, name: "MB" },
+        { factor: 1000 ** 3, name: "GB" },
+        { factor: 1000 ** 4, name: "TB" },
+    ];
+    // Find the biggest unit which gives two digits left of the decimal point (>= 10)
+    let unit;
+    for (unit = units.length - 1; unit >= 0; unit--)
+        if (guide_value / units[unit].factor >= 10)
+            break;
+    // Mark it selected.  If we couldn't find one (-1), then use MB.
+    units[Math.max(0, unit)].selected = true;
+    return units;
 }

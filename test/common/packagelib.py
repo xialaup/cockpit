@@ -13,10 +13,11 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import logging
 import os
+import re
 import textwrap
 
 from testlib import MachineCase
@@ -37,8 +38,12 @@ class PackageCase(MachineCase):
             self.backend = "apt"
             self.primary_arch = "all"
             self.secondary_arch = "amd64"
+        elif re.match(r"fedora-(39|40)|(centos|rhel)-(8|9|10).*", self.machine.image):
+            self.backend = "dnf4"
+            self.primary_arch = "noarch"
+            self.secondary_arch = "x86_64"
         elif self.machine.image.startswith("fedora") or self.machine.image.startswith("rhel-") or self.machine.image.startswith("centos-"):
-            self.backend = "dnf"
+            self.backend = "dnf5"
             self.primary_arch = "noarch"
             self.secondary_arch = "x86_64"
         elif self.machine.image == "arch":
@@ -74,21 +79,6 @@ class PackageCase(MachineCase):
 
             self.machine.execute("rm /etc/pacman.conf /etc/pacman.d/mirrorlist /var/lib/pacman/sync/* /usr/share/libalpm/hooks/90-packagekit-refresh.hook")
             self.machine.execute("test -d /var/lib/PackageKit/alpm && rm -r /var/lib/PackageKit/alpm || true")  # Drop alpm state directory as it interferes with running offline
-            # Initial config for installation
-            empty_repo_dir = '/var/lib/cockpittest/empty'
-            config = f"""
-[options]
-Architecture = auto
-HoldPkg     = pacman glibc
-
-[empty]
-SigLevel = Never
-Server = file://{empty_repo_dir}
-"""
-            # HACK: Setup empty repo for packagekit
-            self.machine.execute(f"mkdir -p {empty_repo_dir} || true")
-            self.machine.execute(f"repo-add {empty_repo_dir}/empty.db.tar.gz")
-            self.machine.write("/etc/pacman.conf", config)
             # Clean up possible leftover lockfile
             self.machine.execute("""
                 if [ -f /var/lib/pacman/db.lck ]; then
@@ -96,7 +86,21 @@ Server = file://{empty_repo_dir}
                     rm /var/lib/pacman/db.lck;
                 fi
             """)
-            self.machine.execute("pacman -Sy")
+
+            # Initial config for installation
+
+            # HACK: pacman does not like no repositories, and also
+            # doesn't like empty repositories. So we enable our test
+            # repo already here, with one bogus package in it.
+
+            self.createPackage("you-are-not-alone-pacman", "1.0", "1")
+            self.enableRepo()
+
+            # Let's also remove the package archive so that subsequent
+            # runs of repo-add don't complain that they have already
+            # seen it.
+            self.machine.execute(f"rm {self.repo_dir}/you-are-not-alone-pacman*")
+
         else:
             self.restore_dir("/etc/yum.repos.d", reboot_safe=True)
             self.restore_dir("/var/cache/dnf", reboot_safe=True)
@@ -114,10 +118,16 @@ Server = file://{empty_repo_dir}
             self.addCleanup(self.machine.execute, "mv /etc/resolv.conf.test /etc/resolv.conf")
 
         # reset automatic updates
-        if self.backend == 'dnf':
+        if self.backend == 'dnf4':
+            self.restore_file("/etc/dnf/automatic.conf")
             self.machine.execute("systemctl disable --now dnf-automatic dnf-automatic-install "
                                  "dnf-automatic.service dnf-automatic-install.timer")
             self.machine.execute("rm -r /etc/systemd/system/dnf-automatic* && systemctl daemon-reload || true")
+
+        if self.backend == 'dnf5':
+            self.restore_file("/etc/dnf/dnf5-plugins/automatic.conf")
+            self.addCleanup(self.machine.execute, "systemctl disable --now dnf5-automatic.timer 2>/dev/null || true")
+            self.addCleanup(self.machine.execute, "rm -r /etc/systemd/system/dnf5-automatic*.d && systemctl daemon-reload || true")
 
         self.updateInfo = {}
 
@@ -147,7 +157,7 @@ Server = file://{empty_repo_dir}
         else:
             self.createRpm(name, version, release, depends, postinst, install, content, arch, provides)
         if updateinfo:
-            self.updateInfo[(name, version, release)] = updateinfo
+            self.updateInfo[name, version, release] = updateinfo
 
     def createDeb(self, name, version, depends, postinst, install, content, arch, provides):
         """Create a dummy deb in repo_dir on self.machine
@@ -300,6 +310,7 @@ pkgdesc="dummy {name}"
 pkgrel={release}
 arch=({arch})
 depends=({requires})
+options=(!debug)
 {sources}
 
 {installcmds}
@@ -413,16 +424,23 @@ post_upgrade() {{
                     """)
 
             config = f"""
+[options]
+Architecture = auto
+HoldPkg     = pacman glibc
+
 [testrepo]
 SigLevel = Never
 Server = file://{self.repo_dir}
             """
-            if 'testrepo' not in self.machine.execute('grep testrepo /etc/pacman.conf || true'):
-                self.machine.write("/etc/pacman.conf", config, append=True)
+            self.machine.write("/etc/pacman.conf", config)
+            self.machine.execute("pacman -Sy")
 
         else:
+            # HACK - https://bugzilla.redhat.com/show_bug.cgi?id=2306114
+            # We need to explicitly create /var/cache/libdnf5 to make "dnf clean" happy.
             self.machine.execute(f"""printf '[updates]\nname=cockpittest\nbaseurl=file://{self.repo_dir}\nenabled=1\ngpgcheck=0\n' > /etc/yum.repos.d/cockpittest.repo
                                      echo '{self.createYumUpdateInfo()}' > /tmp/updateinfo.xml
                                      createrepo_c {self.repo_dir}
                                      modifyrepo_c /tmp/updateinfo.xml {self.repo_dir}/repodata
+                                     mkdir -p /var/cache/libdnf5
                                      dnf clean all""")

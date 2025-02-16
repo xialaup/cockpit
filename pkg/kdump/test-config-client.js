@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import QUnit from "qunit-tests";
@@ -83,6 +83,7 @@ QUnit.module("kdump", hooks => {
                         config.write(config.settings)
                                 .then(() => {
                                     // Close watch channel
+                                    config.removeEventListener('kdumpConfigChanged', configChanged);
                                     config.close();
                                     dataWasChanged.then(done);
                                 });

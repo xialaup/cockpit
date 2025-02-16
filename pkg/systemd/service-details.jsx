@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import React, { useState } from "react";
@@ -536,13 +536,9 @@ export class ServiceDetails extends React.Component {
                 icon={ExclamationCircleIcon}
                 title={title}
                 paragraph={this.props.unitId}
-                action={
-                    <Button variant="link"
-                            component="a"
-                            onClick={() => cockpit.jump(path, cockpit.transport.host)}>
-                        {_("View all services")}
-                    </Button>
-                }
+                action={_("View all services")}
+                actionVariant="link"
+                onAction={() => cockpit.jump(path, cockpit.transport.host)}
             />;
         }
 

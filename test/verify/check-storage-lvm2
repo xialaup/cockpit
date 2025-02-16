@@ -15,7 +15,7 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import math
 import os
@@ -237,8 +237,11 @@ class TestStorageLvm2(storagelib.StorageCase):
         b.wait_text(self.card_row_col("Thinly provisioned LVM2 logical volumes", 1, 3), mount_point_thin)
 
         # prevent unstable usage numbers from failing the pixel test
-        b.assert_pixels('body', "pool-page", mock={".usage-text": "1 / 100 MB"},
-                        ignore=[".usage-bar"])
+        b.assert_pixels('body', "pool-page",
+                        mock={".usage-text": "1 / 100 MB"},
+                        ignore=[".usage-bar",
+                                self.card_desc("Pool for thinly provisioned LVM2 logical volumes", "Data used"),
+                                self.card_desc("Pool for thinly provisioned LVM2 logical volumes", "Metadata used")])
 
         # remove pool
         self.click_card_dropdown("Pool for thinly provisioned LVM2 logical volumes", "Delete")
@@ -450,6 +453,8 @@ class TestStorageLvm2(storagelib.StorageCase):
         b.wait_js_func("ph_count_check", card + f" .storage-stripe-pv-box-dev:contains('{bn(disk3)}')", 1)
         b.wait_js_func("ph_count_check", card + f" .storage-stripe-pv-box-dev:contains('{bn(disk4)}')", 1)
         b.wait_js_func("ph_count_check", card + f" .storage-stripe-pv-box-dev:contains('{bn(disk1)}')", 1)
+
+        b.wait_not_in_text(card, "synchronized")
         b.assert_pixels(card, "raid5-card2")
 
     def testBrokenLinear(self):
@@ -507,7 +512,7 @@ class TestStorageLvm2(storagelib.StorageCase):
 
         b.click(".pf-v5-c-alert button:contains(Dismiss)")
         self.dialog_wait_open()
-        b.wait_in_text("#dialog", "/dev/vgroup0/lvol0")
+        b.wait_in_text("#dialog", "vgroup0/lvol0")
         self.dialog_apply()
         self.dialog_wait_close()
 

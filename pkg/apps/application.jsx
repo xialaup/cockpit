@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -28,8 +28,7 @@ import { Stack } from "@patternfly/react-core/dist/esm/layouts/Stack/index.js";
 import { ExternalLinkAltIcon } from '@patternfly/react-icons';
 
 import * as PackageKit from "./packagekit.js";
-
-import { icon_url, launch, ProgressBar, CancelButton } from "./utils.jsx";
+import { icon_url, launch, ProgressBar, CancelButton } from "./utils";
 
 import "./application.scss";
 
@@ -53,7 +52,7 @@ export const ActionButton = ({ comp, progress, action }) => {
     }
 };
 
-export const Application = ({ metainfo_db, id, progress, progress_title, action }) => {
+export const Application = ({ metainfo_db, id, progress, action }) => {
     if (!id)
         return null;
 
@@ -104,7 +103,7 @@ export const Application = ({ metainfo_db, id, progress, progress_title, action 
 
         let progress_or_launch;
         if (progress) {
-            progress_or_launch = <ProgressBar title={progress_title} data={progress} />;
+            progress_or_launch = <ProgressBar data={progress} />;
         } else if (comp.installed) {
             progress_or_launch = <Button variant="link" onClick={() => launch(comp)}>{_("Go to application")}</Button>;
         } else {

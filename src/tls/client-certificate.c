@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 /*
@@ -304,7 +304,7 @@ client_certificate_create_tmpfile (int  dirfd,
  * referenced by @dirfd.  This file will contain the expected cgroup of
  * the cockpit-ws instance in question, plus the client certificate.
  * That data is interpreted by the counterpart to this code, living in
- * src/ws/cockpit-session-client-certificate.c
+ * src/session/client-certificate.c.
  *
  * In any case, %true will be returned in case of success, and %false
  * will be returned in case of an error.  In case of success, any values

@@ -15,35 +15,38 @@
 # Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+# along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
 
 import time
 
 import testlib
 
 
+@testlib.skipBeiboot("no local overrides/config in beiboot mode")
 @testlib.nondestructive
-@testlib.skipDistroPackage()
 class TestMenu(testlib.MachineCase):
 
     def testDarkThemeSwitcher(self):
         b = self.browser
 
-        def switch_style(style_class, prevPage="system"):
+        def switch_style(style_class, prevPage="system", pixel_test=False):
             b.switch_to_top()
             b.click("#toggle-menu")
+            if pixel_test:
+                b.wait_visible("#toggle-menu-menu")
+                b.assert_pixels_in_current_layout("#toggle-menu-menu", "shell-toggle-menu")
             b.click(f"#topnav {style_class}")
             b.enter_page(f"/{prevPage}")
 
         self.login_and_go("/system")
-        switch_style("#dark")
+        switch_style("#dark", pixel_test=True)
         b._wait_present("html.pf-v5-theme-dark")
 
         switch_style("#light")
         b.wait_not_present("html.pf-v5-theme-dark")
 
         # Test overriding, switching only works on Chromium
-        if b.cdp.browser.name == "chromium":
+        if b.browser == "chromium":
             # Light theme overrides browser defaults
             b._set_emulated_media_theme("dark")
             b.wait_not_present("html.pf-v5-theme-dark")
@@ -65,7 +68,7 @@ class TestMenu(testlib.MachineCase):
         m.execute("mkdir -p /usr/local/share/cockpit/systemd; cp -rp /usr/share/cockpit/systemd/* /usr/local/share/cockpit/systemd")
         m.execute(
             """sed -i '/"menu"/a "memory": { "label": "Memory", "path": "#/memory" },' /usr/local/share/cockpit/systemd/manifest.json""")
-        self.addCleanup(m.execute, "rm -r /usr/local/share/cockpit")
+        self.addCleanup(m.execute, "rm -r /usr/local/share/cockpit/systemd")
 
         self.login_and_go("/system")
 
@@ -81,11 +84,12 @@ class TestMenu(testlib.MachineCase):
 
         # Clicking inside the iframed pages should close the docs menu
         b.click("#toggle-docs")
-        b.wait_visible("#toggle-docs + ul")
+        b.wait_visible("#toggle-docs-menu")
+        b.assert_pixels("#toggle-docs-menu", "shell-docs-menu")
         b.enter_page("/system")
         b.focus("#overview main")
         b.switch_to_top()
-        b.wait_not_present("#toggle-docs + ul")
+        b.wait_not_present("#toggle-docs-menu")
 
         # Check that we can use a link with a hash in it
         b.click_system_menu("/system/#/memory")
@@ -98,15 +102,9 @@ class TestMenu(testlib.MachineCase):
         b.wait_in_text("#host-apps .pf-m-current", "Development")
 
         b.enter_page("/playground/exception")
-        b.wait_visible("button")
-        with self.assertRaisesRegex(RuntimeError, "TypeError:.*undefined"):
-            b.click("button")
-            # Some round trips, one of which should update the deferred exception
-            for _ in range(5):
-                b.wait_visible("button")
-                time.sleep(2)
+        b.click("button")
 
-        # UI should also show the crash
+        # UI should show the crash
         b.switch_to_top()
         b.wait_visible("#navbar-oops")
 
@@ -154,6 +152,67 @@ class TestMenu(testlib.MachineCase):
         b.wait_visible("#login")
         b.wait_visible("#login-info-message")
         b.wait_text("#login-info-message", "You have been logged out due to inactivity.")
+
+    def testKeyboardNavigation(self):
+        b = self.browser
+        self.login_and_go()
+
+        # initially shows host switcher
+        b.wait_visible("#hosts-sel")
+        self.assertEqual(b.eval_js("document.activeElement.tagName"), "BODY")
+        # conceptually we want that, but we use CSS hacks (-999 offset and 1x1 size) to hide it
+        # b.wait_not_visible(".skiplink")
+
+        # press Tab once → "Skip to content" skiplink
+        b.key("Tab")
+        b.wait_js_cond("document.activeElement.classList.contains('skiplink')")
+        self.assertEqual(b.eval_js("document.activeElement.textContent"), "Skip to content")
+        self.assertEqual(b.eval_js("document.activeElement.getAttribute('href')"), "#content")
+        b.key("Enter")
+        b.wait_js_cond("document.activeElement.getAttribute('id') === 'content'")
+        self.assertEqual(b.eval_js("document.activeElement.tagName"), "DIV")
+        self.assertEqual(b.eval_js("document.activeElement.getAttribute('id')"), "content")
+
+        # reset
+        b.reload()
+        b.wait_visible("#hosts-sel")
+        b.wait_text("#super-user-indicator", "Administrative access")
+
+        # press Tab twice → "Skip main navigation" skiplink
+        b.key("Tab")
+        self.assertEqual(b.eval_js("document.activeElement.textContent"), "Skip to content")
+        b.key("Tab")
+        self.assertEqual(b.eval_js("document.activeElement.textContent"), "Skip main navigation")
+        b.key("Enter")
+        b.wait_js_cond("document.activeElement.tagName === 'NAV'")
+        self.assertEqual(b.eval_js("document.activeElement.getAttribute('id')"), "hosts-sel")
+
+        # actually skips the page menu and goes on to top nav bar; where exactly depends on whether
+        # the host switcher is enabled.
+        b.key("Tab")
+        if self.multihost_enabled:
+            b.wait_js_cond("document.activeElement.getAttribute('id') === 'host-toggle'")
+            b.key("Tab")
+        b.wait_js_cond("document.activeElement.textContent === 'Administrative access'")
+
+        # reset
+        b.reload()
+        b.wait_visible("#hosts-sel")
+
+        # without skip links, tabbing goes through page menu
+        b.key("Tab", repeat=5)
+        # different browsers behave a bit different here -- Firefox is at "Overview", Chromium at "Logs"
+        b.wait_js_cond("document.activeElement.classList.contains('pf-v5-c-nav__link')")
+
+    def testCustomLandingPage(self):
+        b = self.browser
+        m = self.machine
+
+        # # Make the logs page the default page
+        m.write("/etc/cockpit/systemd.override.json", '{"menu":{"index":{"order":100},"logs":{"order":1}}}')
+
+        self.login_and_go()
+        b.wait_js_cond('window.location.pathname == "/system/logs"')
 
 
 if __name__ == '__main__':

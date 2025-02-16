@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from 'cockpit';
@@ -235,7 +235,7 @@ function suggest_username(realname) {
 
         for (let k = 0; k < str.length;) {
             if (!is_valid_char_name(str[k]))
-                str = str.substr(0, k) + str.substr(k + 1);
+                str = str.substring(0, k) + str.substring(k + 1);
             else
                 k++;
         }
@@ -286,7 +286,6 @@ export function account_create_dialog(accounts, min_uid, max_uid, shells) {
 
     function get_defaults() {
         return cockpit.spawn(["useradd", "-D"], { superuser: "require", err: "message" })
-                .catch(e => console.warn("Could not get useradd defaults: ", e.message))
                 .then(defaults => {
                     let shell = "";
                     let base_home_dir = null;
@@ -300,6 +299,7 @@ export function account_create_dialog(accounts, min_uid, max_uid, shells) {
                     change("shell", shell);
                     change("base_home_dir", base_home_dir);
                 })
+                .catch(e => console.warn("Could not get useradd defaults: ", e.message))
                 .finally(() => change("dialogLoading", false));
     }
 

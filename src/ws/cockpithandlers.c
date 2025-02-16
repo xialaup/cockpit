@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -245,12 +245,31 @@ add_oauth_to_environment (JsonObject *environment)
   }
 }
 
+static bool have_command (const char *name)
+{
+    gint status;
+    g_autoptr(GError) error = NULL;
+    g_autofree gchar *command = g_strdup_printf ("command -v %s", name);
+    if (g_spawn_sync (NULL,
+                    (gchar * []){ "/bin/sh", "-ec", command, NULL },
+                    NULL,
+                    G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                    NULL, NULL, NULL, NULL, &status, &error))
+      return status == 0;
+    else
+      {
+        g_warning ("Failed to check for %s: %s", name, error->message);
+        return FALSE;
+      }
+}
+
 static void
 add_page_to_environment (JsonObject *object,
                          gboolean    is_cockpit_client)
 {
   static gint page_login_to = -1;
   gboolean require_host = FALSE;
+  gboolean allow_multihost;
   JsonObject *page;
   const gchar *value;
 
@@ -262,44 +281,71 @@ add_page_to_environment (JsonObject *object,
 
   if (page_login_to < 0)
     {
-      page_login_to = cockpit_conf_bool ("WebService", "LoginTo",
-                                         g_file_test (cockpit_ws_ssh_program,
-                                                      G_FILE_TEST_IS_EXECUTABLE));
+      /* cockpit.beiboot is part of cockpit-bridge package */
+      gboolean have_ssh = have_command ("ssh") && have_command ("cockpit-bridge");
+      if (!have_ssh)
+        g_info ("cockpit-bridge or ssh are not available, disabling remote logins");
+      page_login_to = cockpit_conf_bool ("WebService", "LoginTo", have_ssh);
     }
 
   require_host = is_cockpit_client || cockpit_conf_bool ("WebService", "RequireHost", FALSE);
+  allow_multihost = cockpit_conf_bool ("WebService", "AllowMultiHost", ALLOW_MULTIHOST_DEFAULT);
 
   json_object_set_boolean_member (page, "connect", page_login_to);
   json_object_set_boolean_member (page, "require_host", require_host);
+  json_object_set_boolean_member (page, "allow_multihost", allow_multihost);
   json_object_set_object_member (object, "page", page);
 }
 
-static GBytes *
-build_environment (GHashTable *os_release)
+static void
+add_logged_into_to_environment (JsonObject *object,
+                                CockpitAuth *auth,
+                                GHashTable *request_headers)
 {
-  /*
-   * We don't include entirety of os-release into the
-   * environment for the login.html page. There could
-   * be unexpected things in here.
-   *
-   * However since we are displaying branding based on
-   * the OS name variant flavor and version, including
-   * the corresponding information is not a leak.
-   */
-  static const gchar *release_fields[] = {
-    "NAME", "ID", "PRETTY_NAME", "VARIANT", "VARIANT_ID", "CPE_NAME", "ID_LIKE", "DOCUMENTATION_URL"
-  };
+  JsonArray *logged_into = json_array_new ();
 
+  gchar *h = g_hash_table_lookup (request_headers, "Cookie");
+  while (h && *h) {
+    const gchar *start = h;
+    while (*h && *h != '=')
+      h++;
+    const gchar *equal = h;
+    while (*h && *h != ';')
+      h++;
+    const gchar *end = h;
+    if (*h)
+      h++;
+    while (*h && *h == ' ')
+      h++;
+
+    if (*equal != '=')
+      continue;
+
+    g_autofree gchar *value = g_strndup (equal + 1, end - equal - 1);
+
+    if (!cockpit_auth_is_valid_cookie_value (auth, value))
+      continue;
+
+    g_autofree gchar *name = g_strndup (start, equal - start);
+    if (g_str_equal (name, "cockpit"))
+      json_array_add_string_element(logged_into, ".");
+    else if (g_str_has_prefix (name, "machine-cockpit+"))
+      json_array_add_string_element(logged_into, name + strlen("machine-cockpit+"));
+  }
+
+  json_object_set_array_member (object, "logged_into", logged_into);
+}
+
+static GBytes *
+build_environment (CockpitAuth *auth, GHashTable *request_headers)
+{
   static const gchar *prefix = "\n    <script>\nvar environment = ";
   static const gchar *suffix = ";\n    </script>";
 
   GByteArray *buffer;
   GBytes *bytes;
   JsonObject *object;
-  const gchar *value;
   gchar *hostname;
-  JsonObject *osr;
-  gint i;
 
   object = json_object_new ();
 
@@ -307,24 +353,13 @@ build_environment (GHashTable *os_release)
   json_object_set_boolean_member (object, "is_cockpit_client", is_cockpit_client);
 
   add_page_to_environment (object, is_cockpit_client);
+  add_logged_into_to_environment (object, auth, request_headers);
 
   hostname = g_malloc0 (HOST_NAME_MAX + 1);
   gethostname (hostname, HOST_NAME_MAX);
   hostname[HOST_NAME_MAX] = '\0';
   json_object_set_string_member (object, "hostname", hostname);
   g_free (hostname);
-
-  if (os_release)
-    {
-      osr = json_object_new ();
-      for (i = 0; i < G_N_ELEMENTS (release_fields); i++)
-        {
-          value = g_hash_table_lookup (os_release, release_fields[i]);
-          if (value)
-            json_object_set_string_member (osr, release_fields[i], value);
-        }
-      json_object_set_object_member (object, "os-release", osr);
-    }
 
   add_oauth_to_environment (object);
 
@@ -383,7 +418,7 @@ send_login_html (CockpitWebResponse *response,
   GBytes *po_bytes;
   CockpitWebFilter *filter3 = NULL;
 
-  environment = build_environment (ws->os_release);
+  environment = build_environment (ws->auth, headers);
   filter = cockpit_web_inject_new (marker, environment, 1);
   g_bytes_unref (environment);
   cockpit_web_response_add_filter (response, filter);
@@ -452,6 +487,7 @@ send_login_html (CockpitWebResponse *response,
                                     "Content-Security-Policy", content_security_policy,
                                     "Set-Cookie", cookie_line,
                                     NULL);
+      cockpit_web_response_set_cache_type (response, COCKPIT_WEB_RESPONSE_NO_CACHE);
       if (cockpit_web_response_queue (response, bytes))
         cockpit_web_response_complete (response);
 
@@ -482,48 +518,34 @@ on_login_complete (GObject *object,
                    GAsyncResult *result,
                    gpointer user_data)
 {
-  CockpitWebResponse *response = user_data;
-  GError *error = NULL;
-  JsonObject *response_data = NULL;
-  GHashTable *headers;
-  GIOStream *io_stream;
-  GBytes *content;
-
-  io_stream = cockpit_web_response_get_stream (response);
-
-  headers = cockpit_web_server_new_table ();
-  response_data = cockpit_auth_login_finish (COCKPIT_AUTH (object), result,
-                                             io_stream, headers, &error);
+  // consumes the reference on user_data
+  g_autoptr(CockpitWebResponse) response = g_steal_pointer (&user_data);
 
   /* Never cache a login response */
+  g_autoptr(GHashTable) headers = cockpit_web_server_new_table ();
   cockpit_web_response_set_cache_type (response, COCKPIT_WEB_RESPONSE_NO_CACHE);
+
+  g_autoptr(GError) error = NULL;
+  g_autoptr(JsonObject) response_data = cockpit_auth_login_finish (COCKPIT_AUTH (object), result,
+                                                                   cockpit_web_response_get_stream (response),
+                                                                   headers, &error);
+
   if (error)
     {
+      g_autoptr(GBytes) body = NULL;
+
       if (response_data)
         {
           g_hash_table_insert (headers, g_strdup ("Content-Type"), g_strdup ("application/json"));
-          content = cockpit_json_write_bytes (response_data);
-          cockpit_web_response_headers_full (response, 401, "Authentication required", -1, headers);
-          cockpit_web_response_queue (response, content);
-          cockpit_web_response_complete (response);
-          g_bytes_unref (content);
+          body = cockpit_json_write_bytes (response_data);
         }
-      else
-        {
-          cockpit_web_response_gerror (response, headers, error);
-        }
-      g_error_free (error);
+
+      cockpit_web_response_gerror (response, headers, body, error);
     }
   else
     {
       send_login_response (response, response_data, headers);
     }
-
-  if (response_data)
-    json_object_unref (response_data);
-
-  g_hash_table_unref (headers);
-  g_object_unref (response);
 }
 
 static void
@@ -638,6 +660,17 @@ cockpit_handler_default (CockpitWebServer *server,
 
   path = cockpit_web_response_get_path (response);
   g_return_val_if_fail (path != NULL, FALSE);
+
+  /* robots.txt is unauthorized and works on any directory */
+  if (g_str_has_suffix (path, "/robots.txt"))
+    {
+      g_autoptr(GHashTable) out_headers = cockpit_web_server_new_table ();
+      g_hash_table_insert (out_headers, g_strdup ("Content-Type"), g_strdup ("text/plain"));
+      const char *body ="User-agent: *\nDisallow: /\n";
+      g_autoptr(GBytes) content = g_bytes_new_static (body, strlen (body));
+      cockpit_web_response_content (response, out_headers, content, NULL);
+      return TRUE;
+    }
 
   resource = g_str_has_prefix (path, "/cockpit/") ||
              g_str_has_prefix (path, "/cockpit+") ||

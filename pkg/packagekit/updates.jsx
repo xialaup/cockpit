@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 import '../lib/patternfly/patternfly-5-cockpit.scss';
 import 'polyfills'; // once per application
@@ -71,7 +71,7 @@ import { WithDialogs } from "dialogs.jsx";
 
 import { superuser } from 'superuser';
 import * as PK from "packagekit.js";
-import * as timeformat from "timeformat.js";
+import * as timeformat from "timeformat";
 
 import * as python from "python.js";
 import callTracerScript from './callTracer.py';
@@ -307,14 +307,13 @@ function updateItem(remarkable, info, pkgNames, key) {
         if (secSeverityURL)
             secSeverityURL = <a rel="noopener noreferrer" target="_blank" href={secSeverityURL}>{secSeverity}</a>;
         type = (
-            <>
-                <Tooltip id="tip-severity" content={ secSeverity || _("security") }>
-                    <span>
-                        {icon}
-                        { (info.cve_urls && info.cve_urls.length > 0) ? info.cve_urls.length : "" }
-                    </span>
-                </Tooltip>
-            </>);
+            <Tooltip id="tip-severity" content={ secSeverity || _("security") }>
+                <span>
+                    {icon}
+                    { (info.cve_urls && info.cve_urls.length > 0) ? info.cve_urls.length : "" }
+                </span>
+            </Tooltip>
+        );
     } else {
         const tip = (info.severity >= PK.Enum.INFO_NORMAL) ? _("bug fix") : _("enhancement");
         type = (
@@ -341,7 +340,7 @@ function updateItem(remarkable, info, pkgNames, key) {
     if (pkgNames.some(pkg => isKpatchPackage(pkg.name)))
         pkgsTruncated.push(
             <LabelGroup key={`${key}-kpatches-labelgroup`} className="kpatches-labelgroup">
-                {" "}<Badge color="blue" variant="filled">{_("patches")}</Badge>
+                {" "}<Badge color="blue">{_("patches")}</Badge>
             </LabelGroup>
         );
 
@@ -583,7 +582,6 @@ const ApplyUpdates = ({ transactionProps, actions, onCancel, rebootAfter, setReb
     if (actions.length === 0 && percentage === 0) {
         return <EmptyStatePanel title={ _("Initializing...") }
                                 headingLevel="h5"
-                                titleSize="4xl"
                                 secondary={cancelButton}
                                 loading
         />;
@@ -674,18 +672,27 @@ const TwoColumnTitle = ({ icon, str }) => {
 
 const UpdateSuccess = ({ onIgnore, openServiceRestartDialog, openRebootDialog, restart, manual, reboot, tracerAvailable, history }) => {
     if (!tracerAvailable) {
+        /* tracer is not available any more in RHEL 10; as a special case, if only kpatch and kernel were
+         * updated, don't reboot (as that's their whole raison d'être) */
+        const pkgs = Object.keys(history[0] ?? {}).filter(p => p != "_time");
+        const only_kpatch = pkgs.filter(p => p.startsWith("kpatch")).length > 0 &&
+                            pkgs.filter(p => !p.startsWith("kernel") && !p.startsWith("kpatch")).length == 0;
+
+        const paragraph = only_kpatch ? null : _("Updated packages may require a reboot to take effect.");
+        const actions = only_kpatch
+            ? <Button id="ignore" variant="primary" onClick={onIgnore}>{_("Continue")}</Button>
+            : <>
+                <Button id="reboot-system" variant="primary" onClick={openRebootDialog}>{_("Reboot system...")}</Button>
+                <Button id="ignore" variant="link" onClick={onIgnore}>{_("Ignore")}</Button>
+            </>;
+
         return (<>
             <EmptyStatePanel icon={RebootingIcon}
                              title={ _("Update was successful") }
                              headingLevel="h5"
                              titleSize="4xl"
-                             paragraph={ _("Updated packages may require a reboot to take effect.") }
-                             secondary={
-                                 <>
-                                     <Button id="reboot-system" variant="primary" onClick={openRebootDialog}>{_("Reboot system...")}</Button>
-                                     <Button id="ignore" variant="link" onClick={onIgnore}>{_("Ignore")}</Button>
-                                 </>
-                             } />
+                             paragraph={paragraph}
+                             secondary={actions} />
             <div className="flow-list-blank-slate">
                 <ExpandableSection toggleText={_("Package information")}>
                     <PackageList packages={history[0]} />
@@ -782,7 +789,7 @@ const UpdatesStatus = ({ updates, highestSeverity, timeSinceRefresh, tracerPacka
     let lastChecked;
     // PackageKit returns G_MAXUINT if the db was never checked.
     if (timeSinceRefresh !== null && timeSinceRefresh !== 2 ** 32 - 1)
-        lastChecked = cockpit.format(_("Last checked: $0"), timeformat.distanceToNow(new Date().valueOf() - timeSinceRefresh * 1000, true));
+        lastChecked = cockpit.format(_("Last checked: $0"), timeformat.distanceToNow(new Date().valueOf() - timeSinceRefresh * 1000));
 
     const notifications = [];
     if (numUpdates > 0) {
@@ -1127,13 +1134,6 @@ class OsUpdates extends React.Component {
                 }
 
                 u.vendor_urls = vendor_urls;
-                // HACK: bug_urls and cve_urls also contain titles, in a not-quite-predictable order; ignore them,
-                // only pick out http[s] URLs (https://bugs.freedesktop.org/show_bug.cgi?id=104552)
-                if (bug_urls)
-                    bug_urls = bug_urls.filter(url => url.match(/^https?:\/\//));
-                if (cve_urls)
-                    cve_urls = cve_urls.filter(url => url.match(/^https?:\/\//));
-
                 u.description = this.removeHeading(update_text) || changelog;
                 if (update_text)
                     u.markdown = true;
@@ -1462,7 +1462,8 @@ class OsUpdates extends React.Component {
                         </Gallery>
                     </PageSection>
                     { this.state.showRestartServicesDialog &&
-                        <RestartServices tracerPackages={this.state.tracerPackages}
+                        <RestartServices
+                            tracerPackages={this.state.tracerPackages}
                             close={() => this.setState({ showRestartServicesDialog: false })}
                             state={this.state.state}
                             callTracer={(state) => this.callTracer(state)}
@@ -1587,24 +1588,22 @@ class OsUpdates extends React.Component {
             });
 
             return (
-                <>
-                    <PageSection>
-                        <Gallery className='ct-cards-grid' hasGutter>
-                            <CardsPage onValueChanged={this.onValueChanged} handleRefresh={this.handleRefresh} {...this.state} />
-                        </Gallery>
-                        { this.state.showRestartServicesDialog &&
-                            <RestartServices tracerPackages={this.state.tracerPackages}
+                <PageSection>
+                    <Gallery className='ct-cards-grid' hasGutter>
+                        <CardsPage onValueChanged={this.onValueChanged} handleRefresh={this.handleRefresh} {...this.state} />
+                    </Gallery>
+                    { this.state.showRestartServicesDialog &&
+                    <RestartServices tracerPackages={this.state.tracerPackages}
                                 close={() => this.setState({ showRestartServicesDialog: false })}
                                 state={this.state.state}
                                 callTracer={(state) => this.callTracer(state)}
                                 onValueChanged={delta => this.setState(delta)}
                                 loadUpdates={this.loadUpdates} />
-                        }
-                        { this.state.showRebootSystemDialog &&
-                            <ShutdownModal onClose={() => this.setState({ showRebootSystemDialog: false })} />
-                        }
-                    </PageSection>
-                </>
+                    }
+                    { this.state.showRebootSystemDialog &&
+                    <ShutdownModal onClose={() => this.setState({ showRebootSystemDialog: false })} />
+                    }
+                </PageSection>
             );
         }
 

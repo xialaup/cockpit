@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -161,7 +161,7 @@ export const NetworkPage = ({ privileged, operationInProgress, usage_monitor, pl
                                 {_("Edit rules and zones")}
                             </Button>,
                         }}>
-                            <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+                            <Flex gap={{ default: 'gapMd' }} alignItems={{ default: 'alignItemsCenter' }}>
                                 <CardTitle component="h2">{_("Firewall")}</CardTitle>
                                 <FirewallSwitch firewall={firewall} />
                             </Flex>

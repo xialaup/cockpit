@@ -13,7 +13,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
 
@@ -233,7 +233,7 @@ def test_translation(pkgdir):
     assert document.data.read() == b''
 
     # make sure the manifest translations get sent along with manifests.js
-    document = packages.load_path('/manifests.js', {'Accept-Language': 'de'})
+    document = packages.load_path('/manifests-i18n.js', {'Accept-Language': 'de'})
     contents = document.data.read()
     assert b'eins\n' in contents
     assert b'zwo\n' in contents
@@ -283,4 +283,3 @@ def test_overlapping_minified(pkgdir):
     assert document.data.read().decode() == 'min'
     document = packages.load_path('/one/two.min.js', {})
     assert document.data.read().decode() == 'min'
-

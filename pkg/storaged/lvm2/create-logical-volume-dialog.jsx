@@ -14,13 +14,13 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
 import * as PK from "packagekit.js";
 
-import { dialog_open, TextInput, SelectOne, Message, SelectSpaces, SelectOneRadioVertical, SizeSlider, CheckBoxes } from "../dialog.jsx";
+import { dialog_open, TextInput, SelectOne, Message, SelectSpaces, SelectOneRadio, SizeSlider, CheckBoxes } from "../dialog.jsx";
 import { validate_lvm2_name } from "../utils.js";
 
 import { pvs_to_spaces, next_default_logical_volume_name } from "./utils.jsx";
@@ -155,7 +155,7 @@ export function create_logical_volume(client, vgroup) {
 
     function min_pvs_explanation(pvs, min) {
         if (pvs.length <= min)
-            return cockpit.format(_("All $0 selected physical volumes are needed for the choosen layout."),
+            return cockpit.format(_("All $0 selected physical volumes are needed for the chosen layout."),
                                   pvs.length);
         return null;
     }
@@ -189,13 +189,14 @@ export function create_logical_volume(client, vgroup) {
                              },
                              explanation: min_pvs_explanation(pvs_as_spaces, 1)
                          }),
-            SelectOneRadioVertical("layout", _("Layout"),
-                                   {
-                                       value: "linear",
-                                       choices: compute_layout_choices(pvs_as_spaces),
-                                       visible: vals => can_do_layouts && vals.purpose === 'block',
-                                       explanation: layout_descriptions.linear
-                                   }),
+            SelectOneRadio("layout", _("Layout"),
+                           {
+                               vertical: true,
+                               value: "linear",
+                               choices: compute_layout_choices(pvs_as_spaces),
+                               visible: vals => can_do_layouts && vals.purpose === 'block',
+                               explanation: layout_descriptions.linear
+                           }),
             SizeSlider("size", _("Size"),
                        {
                            visible: vals => vals.purpose !== 'vdo',

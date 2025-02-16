@@ -14,7 +14,7 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
+ * along with Cockpit; If not, see <https://www.gnu.org/licenses/>.
  */
 
 import cockpit from "cockpit";
@@ -34,7 +34,7 @@ import { StorageCard, StorageDescription, new_card, navigate_to_new_card_locatio
 import { block_name, fmt_size, get_active_usage, teardown_active_usage, reload_systemd } from "../utils.js";
 import {
     dialog_open, TextInput, SelectSpaces, BlockingMessage, TeardownMessage,
-    init_active_usage_processes
+    init_teardown_usage
 } from "../dialog.jsx";
 
 import { lvm2_create_snapshot_action } from "./volume-group.jsx";
@@ -85,7 +85,7 @@ export function lvol_delete(lvol, card) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage)
+            init_teardown_usage(client, usage)
         ]
     });
 }
@@ -124,7 +124,7 @@ function repair(lvol) {
 
     dialog_open({
         Title: cockpit.format(_("Repair logical volume $0"), lvol.Name),
-        Body: <div><p>{cockpit.format(_("Select the physical volumes that should be used to repair the logical volume. At leat $0 are needed."),
+        Body: <div><p>{cockpit.format(_("Select the physical volumes that should be used to repair the logical volume. At least $0 are needed."),
                                       fmt_size(missing))}</p><br /></div>,
         Fields: [
             SelectSpaces("pvs", _("Physical Volumes"),
@@ -156,7 +156,7 @@ function deactivate(lvol, block) {
 
     dialog_open({
         Title: cockpit.format(_("Deactivate logical volume $0/$1?"), vgroup.Name, lvol.Name),
-        Teardown: TeardownMessage(usage),
+        Teardown: TeardownMessage(usage, true),
         Action: {
             Title: _("Deactivate"),
             action: async function () {
@@ -166,7 +166,7 @@ function deactivate(lvol, block) {
             }
         },
         Inits: [
-            init_active_usage_processes(client, usage)
+            init_teardown_usage(client, usage, true)
         ]
     });
 }
@@ -395,15 +395,13 @@ export const StructureDescription = ({ client, lvol }) => {
             </FlexItem>);
 
         return (
-            <>
-                <StorageDescription title={_("Stripes")}>
-                    <Flex alignItems={{ default: "alignItemsStretch" }}>{stripes}</Flex>
-                    {status}
-                    {lvol.SyncRatio != 1.0
-                        ? <div>{cockpit.format(_("$0 synchronized"), lvol.SyncRatio * 100 + "%")}</div>
-                        : null}
-                </StorageDescription>
-            </>);
+            <StorageDescription title={_("Stripes")}>
+                <Flex alignItems={{ default: "alignItemsStretch" }}>{stripes}</Flex>
+                {status}
+                {lvol.SyncRatio != 1.0
+                    ? <div>{cockpit.format(_("$0 synchronized"), lvol.SyncRatio * 100 + "%")}</div>
+                    : null}
+            </StorageDescription>);
     }
 
     return null;
